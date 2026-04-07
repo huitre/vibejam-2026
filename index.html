@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SamuraiJam</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+    #game-canvas { display: block; width: 100vw; height: 100vh; }
+    #ui-root {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #ui-root > * { pointer-events: auto; }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+  <div id="ui-root"></div>
+  <script type="module" src="/src/client/main.ts"></script>
+</body>
+</html>

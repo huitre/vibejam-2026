@@ -175,6 +175,12 @@ export class Game {
     });
     stateSync.listen();
 
+    // Sync phase if joining a game already in progress
+    const currentPhase = (room.state as any).phase;
+    if (currentPhase && currentPhase !== GamePhase.LOBBY) {
+      this.ui.onPhaseChange(currentPhase);
+    }
+
     // 10. Debug panel
     new DebugPanel(this.weapons, this.inputSender);
 

@@ -16,6 +16,7 @@ import { WaterBombVisual } from "./abilities/WaterBombVisual.js";
 import { TorchVisual } from "./abilities/TorchVisual.js";
 import { ChargeVisual } from "./abilities/ChargeVisual.js";
 import { LocalPlayer } from "./entities/LocalPlayer.js";
+import { DebugPanel } from "./ui/DebugPanel.js";
 import { ServerMsg, PlayerRole, AbilityType, GamePhase } from "../shared/types.js";
 
 export class Game {
@@ -44,12 +45,14 @@ export class Game {
     this.sceneManager.initialize();
     const scene = this.sceneManager.getScene();
 
-    // 2. Build map
-    MapBuilder.build(scene);
-
-    // 3. Initialize systems
+    // 2. Build map + preload models (all in parallel)
     this.lighting = new LightingManager(scene);
     this.characters = new CharacterRenderer(scene);
+    await Promise.all([
+      MapBuilder.build(scene),
+      this.lighting.loadModel(),
+      this.characters.loadModel(),
+    ]);
     this.weapons = new WeaponRenderer(this.characters);
     this.effects = new EffectRenderer(scene);
     this.combat = new CombatVisuals(scene);
@@ -78,6 +81,14 @@ export class Game {
       this.localRole = data.role;
       this.ui.setRole(data.role);
       this.localPlayer = new LocalPlayer(this.localSessionId, data.role, this.inputManager, this.inputSender);
+      this.localPlayer.onAttack(() => {
+        const entity = this.characters.getEntity(this.localSessionId);
+        if (entity) {
+          const pos = entity.group.position;
+          const swingHandle = this.weapons.playSwing(this.localSessionId);
+          this.combat.showSlash(pos.x, pos.y, pos.z, entity.currentRot, swingHandle);
+        }
+      });
     });
 
     room.onMessage(ServerMsg.GAME_START, () => {
@@ -85,11 +96,17 @@ export class Game {
     });
 
     room.onMessage(ServerMsg.ATTACK_RESULT, (data: any) => {
+      // Remote players' attacks (local player already shows slash immediately)
       const attacker = this.characters.getEntity(data.attackerSessionId);
       if (attacker) {
         const pos = attacker.group.position;
-        this.combat.showSlash(pos.x, pos.y, pos.z, attacker.currentRot);
+        const swingHandle = this.weapons.playSwing(data.attackerSessionId);
+        this.combat.showSlash(pos.x, pos.y, pos.z, attacker.currentRot, swingHandle);
       }
+    });
+
+    room.onMessage(ServerMsg.PLAYER_HIT, (data: any) => {
+      this.combat.showHitSparks(data.x, data.y ?? 0, data.z);
     });
 
     room.onMessage(ServerMsg.ABILITY_EFFECT, (data: any) => {
@@ -158,7 +175,10 @@ export class Game {
     });
     stateSync.listen();
 
-    // 10. Ready button
+    // 10. Debug panel
+    new DebugPanel(this.weapons, this.inputSender);
+
+    // 11. Ready button
     this.ui.onReady(() => {
       this.inputSender.sendReady();
     });

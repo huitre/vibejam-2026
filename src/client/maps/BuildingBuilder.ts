@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { MAP } from "../../shared/constants.js";
+import { toonGradientMap } from "../render/ToonGradient.js";
 
 const { BUILDING_HEIGHT, ROOF_OVERHANG } = MAP;
 
@@ -57,10 +58,9 @@ export class BuildingBuilder {
   ): void {
     // Walls
     const wallGeom = new THREE.BoxGeometry(w, h, d);
-    const wallMat = new THREE.MeshStandardMaterial({
+    const wallMat = new THREE.MeshToonMaterial({
       color: 0x3a2820,
-      roughness: 0.9,
-      metalness: 0.0,
+      gradientMap: toonGradientMap,
     });
     const walls = new THREE.Mesh(wallGeom, wallMat);
     walls.position.set(x + w / 2, h / 2, z + d / 2);
@@ -74,10 +74,9 @@ export class BuildingBuilder {
       0.3,
       d + ROOF_OVERHANG * 2,
     );
-    const roofMat = new THREE.MeshStandardMaterial({
+    const roofMat = new THREE.MeshToonMaterial({
       color: roofColor,
-      roughness: 0.7,
-      metalness: 0.1,
+      gradientMap: toonGradientMap,
     });
     const roof = new THREE.Mesh(roofGeom, roofMat);
     roof.position.set(x + w / 2, h + 0.15, z + d / 2);

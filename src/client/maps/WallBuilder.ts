@@ -1,20 +1,19 @@
 import * as THREE from "three";
 import { MAP } from "../../shared/constants.js";
+import { toonGradientMap } from "../render/ToonGradient.js";
 
 const { WIDTH, DEPTH, WALL_HEIGHT, WALL_THICKNESS } = MAP;
 
 export class WallBuilder {
   static build(scene: THREE.Scene): void {
-    const wallMat = new THREE.MeshStandardMaterial({
+    const wallMat = new THREE.MeshToonMaterial({
       color: 0x555555,
-      roughness: 0.8,
-      metalness: 0.1,
+      gradientMap: toonGradientMap,
     });
 
-    const spiritWallMat = new THREE.MeshStandardMaterial({
+    const spiritWallMat = new THREE.MeshToonMaterial({
       color: 0x444444,
-      roughness: 0.8,
-      metalness: 0.1,
+      gradientMap: toonGradientMap,
     });
 
     // West wall
@@ -64,7 +63,7 @@ export class WallBuilder {
 
   private static createWall(
     scene: THREE.Scene,
-    material: THREE.MeshStandardMaterial,
+    material: THREE.MeshToonMaterial,
     width: number,
     height: number,
     depth: number,

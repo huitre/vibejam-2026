@@ -6,6 +6,16 @@ import { PlayerRole } from "../../shared/types.js";
 const PLAYER_RADIUS = 0.4;
 
 export class PhysicsSystem {
+  private noclipPlayers = new Set<string>();
+
+  toggleNoclip(sessionId: string): void {
+    if (this.noclipPlayers.has(sessionId)) {
+      this.noclipPlayers.delete(sessionId);
+    } else {
+      this.noclipPlayers.add(sessionId);
+    }
+  }
+
   applyMovement(player: PlayerState, dx: number, dz: number, rotationY: number, deltaMs: number): void {
     if (!player.alive || player.isStunned) return;
 
@@ -24,8 +34,8 @@ export class PhysicsSystem {
     const newX = player.x + worldDx;
     const newZ = player.z + worldDz;
 
-    // Check collision
-    if (!this.collidesWithWall(newX, newZ)) {
+    // Check collision (skip for noclip players)
+    if (this.noclipPlayers.has(player.sessionId) || !this.collidesWithWall(newX, newZ)) {
       player.x = Math.max(PLAYER_RADIUS, Math.min(MAP.WIDTH - PLAYER_RADIUS, newX));
       player.z = Math.max(PLAYER_RADIUS, Math.min(MAP.DEPTH - PLAYER_RADIUS, newZ));
     } else {

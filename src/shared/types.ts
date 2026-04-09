@@ -30,6 +30,7 @@ export enum ClientMsg {
   USE_ABILITY = "use_ability",
   SELECT_WEAPON = "select_weapon",
   READY = "ready",
+  DEBUG_NOCLIP = "debug_noclip",
 }
 
 export enum ServerMsg {
@@ -40,4 +41,5 @@ export enum ServerMsg {
   GAME_OVER = "game_over",
   PLAYER_KILLED = "player_killed",
   LAMP_CHANGED = "lamp_changed",
+  PLAYER_HIT = "player_hit",
 }

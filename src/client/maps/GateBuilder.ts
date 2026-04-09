@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import { MAP } from "../../shared/constants.js";
+import { toonGradientMap } from "../render/ToonGradient.js";
 
 export class GateBuilder {
   static build(scene: THREE.Scene): void {
-    const woodMat = new THREE.MeshStandardMaterial({
+    const woodMat = new THREE.MeshToonMaterial({
       color: 0x3a2820,
-      roughness: 0.85,
-      metalness: 0.0,
+      gradientMap: toonGradientMap,
     });
 
     const pillarHeight = MAP.WALL_HEIGHT + 1;

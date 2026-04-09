@@ -72,6 +72,10 @@ export class SamuraiJamRoom extends Room<GameState> {
       }
     });
 
+    this.onMessage(ClientMsg.DEBUG_NOCLIP, (client) => {
+      this.physics.toggleNoclip(client.sessionId);
+    });
+
     this.onMessage(ClientMsg.READY, (client) => {
       console.log(`[Room] READY received from ${client.sessionId}, players: ${this.state.players.size}/${GAME.DEV_MIN_PLAYERS}`);
       this.checkStartConditions();

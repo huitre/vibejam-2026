@@ -37,4 +37,8 @@ export class InputSender {
   sendReady(): void {
     this.room.send(ClientMsg.READY, {});
   }
+
+  sendDebugNoclip(): void {
+    this.room.send(ClientMsg.DEBUG_NOCLIP, {});
+  }
 }

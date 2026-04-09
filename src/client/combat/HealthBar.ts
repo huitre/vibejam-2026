@@ -22,6 +22,8 @@ export class HealthBar {
     fill.position.z = 0.001;
     fill.renderOrder = 1000;
 
+    bg.visible = false;
+    fill.visible = false;
     group.add(bg);
     group.add(fill);
     this.bars.set(sessionId, { bg, fill });

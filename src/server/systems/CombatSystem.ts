@@ -21,6 +21,11 @@ export class CombatSystem {
     player.lastAttackTime = now;
     player.isAttacking = true;
 
+    // Broadcast attack visual to all clients (except attacker who shows it locally)
+    this.room.broadcast(ServerMsg.ATTACK_RESULT, {
+      attackerSessionId: player.sessionId,
+    }, { except: client });
+
     // Determine weapon stats
     let damage: number;
     let range: number;
@@ -72,11 +77,10 @@ export class CombatSystem {
 
       target.hp = Math.max(0, target.hp - finalDamage);
 
-      this.room.broadcast(ServerMsg.ATTACK_RESULT, {
-        attackerSessionId: player.sessionId,
-        targetSessionId: target.sessionId,
-        damage: finalDamage,
-        targetHpAfter: target.hp,
+      this.room.broadcast(ServerMsg.PLAYER_HIT, {
+        x: target.x,
+        y: target.y,
+        z: target.z,
       });
 
       if (target.hp <= 0) {

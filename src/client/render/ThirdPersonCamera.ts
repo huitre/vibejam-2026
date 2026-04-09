@@ -10,10 +10,14 @@ export class ThirdPersonCamera {
   private currentLookat = new THREE.Vector3();
   private targetPos = new THREE.Vector3();
   private phi = 0;
+  private movementPhi = 0;
   private theta = 0.3;
   private mouseXDelta = 0;
   private mouseYDelta = 0;
+  private freeLookXDelta = 0;
+  private freeLookYDelta = 0;
   private firstFollow = true;
+  private rightButtonDown = false;
 
   constructor(domElement: HTMLElement) {
     this.camera = new THREE.PerspectiveCamera(
@@ -28,6 +32,9 @@ export class ThirdPersonCamera {
       if (document.pointerLockElement === domElement) {
         this.mouseXDelta += e.movementX;
         this.mouseYDelta += e.movementY;
+      } else if (this.rightButtonDown) {
+        this.freeLookXDelta += e.movementX;
+        this.freeLookYDelta += e.movementY;
       }
     });
 
@@ -36,16 +43,37 @@ export class ThirdPersonCamera {
         domElement.requestPointerLock();
       }
     });
+
+    domElement.addEventListener("mousedown", (e: MouseEvent) => {
+      if (e.button === 2) this.rightButtonDown = true;
+    });
+
+    domElement.addEventListener("mouseup", (e: MouseEvent) => {
+      if (e.button === 2) this.rightButtonDown = false;
+    });
+
+    domElement.addEventListener("contextmenu", (e: Event) => {
+      e.preventDefault();
+    });
   }
 
   update(deltaSec: number): void {
-    // Accumulate mouse rotation
+    // Pointer-lock movement → updates both camera orbit and player facing
     const xh = this.mouseXDelta / window.innerWidth;
     const yh = this.mouseYDelta / window.innerHeight;
     this.phi += -xh * 8;
+    this.movementPhi += -xh * 8;
     this.theta = Math.min(Math.max(this.theta + yh * 5, 0.05), 1.3);
     this.mouseXDelta = 0;
     this.mouseYDelta = 0;
+
+    // Free-look (right-click) → camera orbit only, player keeps facing direction
+    const fxh = this.freeLookXDelta / window.innerWidth;
+    const fyh = this.freeLookYDelta / window.innerHeight;
+    this.phi += -fxh * 8;
+    this.theta = Math.min(Math.max(this.theta + fyh * 5, 0.05), 1.3);
+    this.freeLookXDelta = 0;
+    this.freeLookYDelta = 0;
 
     const idealOffset = this.calculateIdealOffset();
     const idealLookat = this.calculateIdealLookat();
@@ -67,7 +95,7 @@ export class ThirdPersonCamera {
   }
 
   private calculateIdealOffset(): THREE.Vector3 {
-    const distance = 14;
+    const distance = 8;
     // Camera behind and above the player, controlled by theta (pitch)
     const idealOffset = new THREE.Vector3(
       0,
@@ -97,7 +125,7 @@ export class ThirdPersonCamera {
   }
 
   getYaw(): number {
-    return this.phi;
+    return this.movementPhi;
   }
 
   updateAspect(aspect: number): void {

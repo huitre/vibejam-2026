@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { toonGradientMap } from "./ToonGradient.js";
 
 interface ProjectileState {
   x: number;
@@ -47,10 +48,11 @@ export class EffectRenderer {
 
     const color = PROJECTILE_COLORS[state.type] ?? 0xffffff;
     const geometry = new THREE.SphereGeometry(0.15, 8, 8);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new THREE.MeshToonMaterial({
       color,
       emissive: color,
       emissiveIntensity: 0.5,
+      gradientMap: toonGradientMap,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -129,18 +131,18 @@ export class EffectRenderer {
       effect.mesh.scale.setScalar(currentRadius / 0.1); // 0.1 is base sphere radius
 
       // Fade out
-      const material = effect.mesh.material as THREE.MeshStandardMaterial;
+      const material = effect.mesh.material as THREE.MeshToonMaterial;
       material.opacity = 0.2 * (1.0 - progress);
     }
   }
 
   private createSmokeImpact(x: number, y: number, z: number, maxRadius: number): void {
     const geometry = new THREE.SphereGeometry(0.1, 12, 12);
-    const material = new THREE.MeshStandardMaterial({
+    const material = new THREE.MeshToonMaterial({
       color: 0x888888,
       transparent: true,
       opacity: 0.2,
-      depthWrite: false,
+      gradientMap: toonGradientMap,
     });
 
     const mesh = new THREE.Mesh(geometry, material);

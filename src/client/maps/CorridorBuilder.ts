@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { toonGradientMap } from "../render/ToonGradient.js";
 
 const CORRIDOR_WIDTH = 4;
 const CORRIDOR_HEIGHT = 3.5;
@@ -27,22 +28,19 @@ const CORRIDORS: CorridorDef[] = [
 
 export class CorridorBuilder {
   static build(scene: THREE.Scene): void {
-    const floorMat = new THREE.MeshStandardMaterial({
+    const floorMat = new THREE.MeshToonMaterial({
       color: 0x4a3728,
-      roughness: 0.85,
-      metalness: 0.0,
+      gradientMap: toonGradientMap,
     });
 
-    const roofMat = new THREE.MeshStandardMaterial({
+    const roofMat = new THREE.MeshToonMaterial({
       color: 0x4a3728,
-      roughness: 0.85,
-      metalness: 0.0,
+      gradientMap: toonGradientMap,
     });
 
-    const columnMat = new THREE.MeshStandardMaterial({
+    const columnMat = new THREE.MeshToonMaterial({
       color: 0x888888,
-      roughness: 0.6,
-      metalness: 0.2,
+      gradientMap: toonGradientMap,
     });
 
     for (const corridor of CORRIDORS) {
@@ -53,9 +51,9 @@ export class CorridorBuilder {
   private static createCorridor(
     scene: THREE.Scene,
     def: CorridorDef,
-    floorMat: THREE.MeshStandardMaterial,
-    roofMat: THREE.MeshStandardMaterial,
-    columnMat: THREE.MeshStandardMaterial,
+    floorMat: THREE.MeshToonMaterial,
+    roofMat: THREE.MeshToonMaterial,
+    columnMat: THREE.MeshToonMaterial,
   ): void {
     const dx = def.endX - def.startX;
     const dz = def.endZ - def.startZ;

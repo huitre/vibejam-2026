@@ -8,11 +8,22 @@ const CHARACTER_COLORS: Record<string, number> = {
   shogun: 0xffcc00,
 };
 
+const STUN_STAR_COUNT = 4;
+const STUN_ORBIT_RADIUS = 0.5;
+const STUN_ORBIT_HEIGHT = 2.4;
+const STUN_STAR_COLOR = 0xffdd00;
+const STUN_SPIN_SPEED = 4; // radians per second
+
 interface CharacterEntity {
   group: THREE.Group;
   targetPos: THREE.Vector3;
   targetRot: number;
   currentRot: number;
+  currentWeapon: string;
+  dead: boolean;
+  deathStartTime: number;
+  deathFaded: boolean;
+  stunGroup: THREE.Group | null;
 }
 
 export class CharacterRenderer {
@@ -134,13 +145,10 @@ export class CharacterRenderer {
 
     if (baseModel) {
       const clone = baseModel.clone(true);
-      // Clone materials per instance and tint with role color
+      // Clone materials per instance (no tint — keep original textures)
       clone.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          const srcMat = child.material as THREE.MeshToonMaterial;
-          const mat = srcMat.clone();
-          mat.color.multiply(new THREE.Color(color));
-          child.material = mat;
+          child.material = (child.material as THREE.MeshToonMaterial).clone();
           child.castShadow = true;
           child.receiveShadow = true;
         }
@@ -183,6 +191,11 @@ export class CharacterRenderer {
       targetPos: new THREE.Vector3(x, y, z),
       targetRot: 0,
       currentRot: 0,
+      currentWeapon: "",
+      dead: false,
+      deathStartTime: 0,
+      deathFaded: false,
+      stunGroup: null,
     });
   }
 
@@ -190,6 +203,7 @@ export class CharacterRenderer {
     const entity = this.entities.get(sessionId);
     if (!entity) return;
 
+    this.endStun(sessionId);
     this.scene.remove(entity.group);
     entity.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
@@ -210,8 +224,63 @@ export class CharacterRenderer {
     entity.targetRot = rotation;
   }
 
+  playDeath(sessionId: string): void {
+    const entity = this.entities.get(sessionId);
+    if (!entity || entity.dead) return;
+    entity.dead = true;
+    entity.deathStartTime = performance.now();
+    // Switch to YXZ so rotation.x tips forward in character-local space
+    entity.group.rotation.order = "YXZ";
+  }
+
+  startStun(sessionId: string): void {
+    const entity = this.entities.get(sessionId);
+    if (!entity || entity.stunGroup) return;
+
+    const orbit = new THREE.Group();
+    orbit.position.y = STUN_ORBIT_HEIGHT;
+
+    const starGeo = new THREE.OctahedronGeometry(0.1, 0);
+    const starMat = new THREE.MeshBasicMaterial({ color: STUN_STAR_COLOR });
+
+    for (let i = 0; i < STUN_STAR_COUNT; i++) {
+      const angle = (i / STUN_STAR_COUNT) * Math.PI * 2;
+      const star = new THREE.Mesh(starGeo, starMat);
+      star.position.set(
+        Math.cos(angle) * STUN_ORBIT_RADIUS,
+        0,
+        Math.sin(angle) * STUN_ORBIT_RADIUS,
+      );
+      orbit.add(star);
+    }
+
+    entity.group.add(orbit);
+    entity.stunGroup = orbit;
+  }
+
+  endStun(sessionId: string): void {
+    const entity = this.entities.get(sessionId);
+    if (!entity || !entity.stunGroup) return;
+
+    entity.group.remove(entity.stunGroup);
+    entity.stunGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (child.material instanceof THREE.Material) child.material.dispose();
+      }
+    });
+    entity.stunGroup = null;
+  }
+
   interpolateAll(lerpFactor: number = 0.15): void {
+    const time = performance.now() * 0.001;
+
     for (const entity of this.entities.values()) {
+      if (entity.dead) {
+        this.animateDeath(entity);
+        continue;
+      }
+
       entity.group.position.lerp(entity.targetPos, lerpFactor);
 
       // Smoothly interpolate rotation (handle wrapping)
@@ -220,6 +289,35 @@ export class CharacterRenderer {
       while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
       entity.currentRot += rotDiff * lerpFactor;
       entity.group.rotation.y = entity.currentRot + Math.PI;
+
+      // Spin stun stars
+      if (entity.stunGroup) {
+        entity.stunGroup.rotation.y = time * STUN_SPIN_SPEED;
+      }
+    }
+  }
+
+  private animateDeath(entity: CharacterEntity): void {
+    const elapsed = performance.now() - entity.deathStartTime;
+    const duration = 600;
+    const t = Math.min(1, elapsed / duration);
+    const eased = t * (2 - t); // easeOutQuad
+
+    // Fall forward in character's local space
+    entity.group.rotation.x = -eased * (Math.PI / 2);
+
+    // Fade materials after animation completes
+    if (t >= 1 && !entity.deathFaded) {
+      entity.deathFaded = true;
+      entity.group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          const mat = child.material;
+          if (mat instanceof THREE.Material) {
+            mat.transparent = true;
+            mat.opacity = 0.4;
+          }
+        }
+      });
     }
   }
 

@@ -5,6 +5,9 @@ import { LAMP_POSITIONS, LAMP } from "../../shared/constants.js";
 export class LightingSystem {
   constructor(private state: GameState) {}
 
+  // DEV: lamps that start unlit for testing relight
+  private static DEV_UNLIT = new Set(["lamp_28", "lamp_29", "lamp_30"]);
+
   initializeLamps(): void {
     for (const pos of LAMP_POSITIONS) {
       const lamp = new LampState();
@@ -12,7 +15,7 @@ export class LightingSystem {
       lamp.x = pos.x;
       lamp.z = pos.z;
       lamp.y = LAMP.DEFAULT_HEIGHT;
-      lamp.lit = true;
+      lamp.lit = !LightingSystem.DEV_UNLIT.has(pos.id);
       this.state.lamps.set(pos.id, lamp);
     }
   }
@@ -51,6 +54,10 @@ export class LightingSystem {
     });
 
     return nearest;
+  }
+
+  getLampState(lampId: string): LampState | undefined {
+    return this.state.lamps.get(lampId);
   }
 
   findNearestLitLamp(x: number, z: number, maxRange: number): LampState | null {

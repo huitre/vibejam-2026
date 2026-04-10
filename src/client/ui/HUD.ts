@@ -13,6 +13,8 @@ export class HUD {
   private roleIndicator: HTMLDivElement;
   private controlsHelp: HTMLDivElement;
   private debugCoords: HTMLDivElement;
+  private bombIndicator: HTMLDivElement;
+  private torchCounter: HTMLDivElement;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement("div");
@@ -67,6 +69,27 @@ export class HUD {
     `;
     this.container.appendChild(this.debugCoords);
 
+    // Bomb selection indicator (bottom-center)
+    this.bombIndicator = document.createElement("div");
+    this.bombIndicator.style.cssText = `
+      position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+      font-size: 18px; color: white; font-weight: bold;
+      text-shadow: 2px 2px 4px black; text-align: center;
+      padding: 8px 16px; background: rgba(0,0,0,0.4); border-radius: 6px;
+      display: none;
+    `;
+    this.container.appendChild(this.bombIndicator);
+
+    // Torch counter (below health bar, samurai only)
+    this.torchCounter = document.createElement("div");
+    this.torchCounter.style.cssText = `
+      position: absolute; top: 75px; left: 20px;
+      font-size: 15px; color: #ff8833; font-weight: bold;
+      text-shadow: 1px 1px 3px black;
+      display: none;
+    `;
+    this.container.appendChild(this.torchCounter);
+
     parent.appendChild(this.container);
     this.container.style.display = "none";
   }
@@ -100,6 +123,26 @@ export class HUD {
 
   updateDebugCoords(x: number, y: number, z: number, rot: number): void {
     this.debugCoords.textContent = `X: ${x.toFixed(1)}  Z: ${z.toFixed(1)}  Y: ${y.toFixed(1)}\nRot: ${(rot * 180 / Math.PI).toFixed(0)}°`;
+  }
+
+  showBombSelected(kind: string): void {
+    const label = kind === "water_bomb" ? "Water Bomb" : "Smoke Bomb";
+    const color = kind === "water_bomb" ? "#4488ff" : "#aaaaaa";
+    this.bombIndicator.innerHTML = `<span style="color:${color}">[${label} Selected]</span> - Hold Click to Aim`;
+    this.bombIndicator.style.display = "block";
+  }
+
+  hideBombSelected(): void {
+    this.bombIndicator.style.display = "none";
+  }
+
+  updateTorchCount(count: number): void {
+    this.torchCounter.style.display = "block";
+    this.torchCounter.textContent = `\uD83D\uDD25 Torches: ${count}`;
+  }
+
+  hideTorchCount(): void {
+    this.torchCounter.style.display = "none";
   }
 
   show(): void { this.container.style.display = "block"; }

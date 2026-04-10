@@ -7,6 +7,7 @@ export enum PlayerRole {
 export enum WeaponType {
   KATANA = "katana",
   LANCE = "lance",
+  TORCH = "torch",
   NONE = "none",
 }
 
@@ -21,6 +22,8 @@ export enum AbilityType {
   WATER_BOMB = "water_bomb",
   SMOKE_BOMB = "smoke_bomb",
   TORCH_RELIGHT = "torch_relight",
+  TORCH_RELIGHT_START = "torch_relight_start",
+  TORCH_RELIGHT_CANCEL = "torch_relight_cancel",
   SHOGUN_CHARGE = "shogun_charge",
 }
 

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OutlineEffect } from "three/examples/jsm/effects/OutlineEffect.js";
 import { ThirdPersonCamera } from "./ThirdPersonCamera.js";
+import { LIGHTING } from "../../shared/constants.js";
 
 export class SceneManager {
   private scene!: THREE.Scene;
@@ -20,13 +21,12 @@ export class SceneManager {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // Moonlight only — 30% brightness on lit surfaces
     // Ambient fills shadow areas slightly so geometry is readable
-    const ambient = new THREE.AmbientLight(0xffffff, 0.08);
+    const ambient = new THREE.AmbientLight(0xffffff, LIGHTING.AMBIENT_INTENSITY);
     this.scene.add(ambient);
 
     // Directional moonlight — cool blue, high angle
-    const moon = new THREE.DirectionalLight(0xaabbdd, 0.22);
+    const moon = new THREE.DirectionalLight(0xaabbdd, LIGHTING.MOON_INTENSITY);
     moon.position.set(30, 60, 40);
     moon.castShadow = true;
     moon.shadow.mapSize.set(2048, 2048);

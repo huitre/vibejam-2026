@@ -17,6 +17,9 @@ export class CombatSystem {
     const stats = STATS[player.role as keyof typeof STATS];
     const cooldown = ('attackCooldownMs' in stats) ? stats.attackCooldownMs : 800;
 
+    // Torch cannot attack
+    if (player.role === PlayerRole.SAMURAI && player.weapon === WeaponType.TORCH) return;
+
     if (now - player.lastAttackTime < cooldown) return;
     player.lastAttackTime = now;
     player.isAttacking = true;

@@ -16,6 +16,7 @@ export class PlayerState extends Schema {
   @type("boolean") isInSmoke: boolean = false;
   @type("boolean") isClimbing: boolean = false;
   @type("int32") lastAttackTime: number = 0;
+  @type("int16") torchesLeft: number = 0;
 
   // Server-only (not synced)
   waterBombsLeft: number = 0;
@@ -23,4 +24,6 @@ export class PlayerState extends Schema {
   hasGrapplingHook: boolean = false;
   chargeCooldownUntil: number = 0;
   stunUntil: number = 0;
+  channelingLampId: string | null = null;
+  channelingStartTime: number = 0;
 }

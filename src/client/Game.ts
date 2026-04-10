@@ -18,6 +18,7 @@ import { ChargeVisual } from "./abilities/ChargeVisual.js";
 import { LocalPlayer } from "./entities/LocalPlayer.js";
 import { DebugPanel } from "./ui/DebugPanel.js";
 import { ServerMsg, PlayerRole, AbilityType, GamePhase } from "../shared/types.js";
+import { GAME } from "../shared/constants.js";
 
 export class Game {
   private sceneManager!: SceneManager;
@@ -48,16 +49,18 @@ export class Game {
     // 2. Build map + preload models (all in parallel)
     this.lighting = new LightingManager(scene);
     this.characters = new CharacterRenderer(scene);
+    this.effects = new EffectRenderer(scene);
     await Promise.all([
       MapBuilder.build(scene),
       this.lighting.loadModel(),
       this.characters.loadModel(),
+      this.effects.loadModels(),
     ]);
     this.weapons = new WeaponRenderer(this.characters);
-    this.effects = new EffectRenderer(scene);
     this.combat = new CombatVisuals(scene);
     this.healthBars = new HealthBar(scene);
     this.smokeBomb = new SmokeBombVisual(scene);
+    this.smokeBomb.setCamera(this.sceneManager.getThirdPersonCamera().getCamera());
     this.waterBomb = new WaterBombVisual(scene);
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
@@ -80,7 +83,17 @@ export class Game {
     room.onMessage(ServerMsg.ROLE_ASSIGNED, (data: { role: string }) => {
       this.localRole = data.role;
       this.ui.setRole(data.role);
-      this.localPlayer = new LocalPlayer(this.localSessionId, data.role, this.inputManager, this.inputSender);
+      this.localPlayer = new LocalPlayer(
+        this.localSessionId, data.role,
+        this.inputManager, this.inputSender,
+        scene,
+      );
+      this.localPlayer.onWindUp(() => {
+        this.weapons.startWindUp(this.localSessionId);
+      });
+      this.localPlayer.onCancelWindUp(() => {
+        this.weapons.cancelWindUp(this.localSessionId);
+      });
       this.localPlayer.onAttack(() => {
         const entity = this.characters.getEntity(this.localSessionId);
         if (entity) {
@@ -125,6 +138,15 @@ export class Game {
           }
           break;
         }
+        case AbilityType.TORCH_RELIGHT_START:
+          this.lighting.startRelighting(data.lampId, data.duration);
+          break;
+        case AbilityType.TORCH_RELIGHT_CANCEL:
+          this.lighting.cancelRelighting(data.lampId);
+          break;
+        case AbilityType.TORCH_RELIGHT:
+          this.lighting.completeRelighting(data.lampId);
+          break;
       }
     });
 
@@ -136,28 +158,69 @@ export class Game {
     const stateSync = new StateSync(room, {
       onPlayerAdded: (sessionId, player) => {
         this.characters.addPlayer(sessionId, player.role, player.x, player.y, player.z);
-        const group = this.characters.getGroup(sessionId);
-        if (group) {
-          this.healthBars.addBar(sessionId, group);
+        const entity = this.characters.getEntity(sessionId);
+        if (entity) {
+          this.healthBars.addBar(sessionId, entity.group);
+          entity.currentWeapon = player.weapon;
           this.weapons.updateWeapon(sessionId, player.weapon);
-          if (player.role === PlayerRole.SAMURAI) {
-            this.torchVisual.addTorch(sessionId, group);
-          }
         }
-        this.ui.setPlayerCount((room.state as any).players.size);
+        const playerCount = (room.state as any).players.size;
+        this.ui.setPlayerCount(playerCount);
+        if (playerCount >= GAME.DEV_MIN_PLAYERS) {
+          this.ui.showReadyButton();
+        }
       },
       onPlayerRemoved: (sessionId) => {
         this.characters.removePlayer(sessionId);
         this.healthBars.removeBar(sessionId);
         this.weapons.removeWeapon(sessionId);
-        this.torchVisual.removeTorch(sessionId);
+        const playerCount = (room.state as any).players.size;
+        this.ui.setPlayerCount(playerCount);
+        if (playerCount < GAME.DEV_MIN_PLAYERS) {
+          this.ui.hideReadyButton();
+        }
       },
       onPlayerChanged: (sessionId, player) => {
         this.characters.updatePlayer(sessionId, player.x, player.y, player.z, player.rotationY);
         this.healthBars.updateBar(sessionId, player.hp, player.maxHp);
+
+        // Detect weapon change and update visual
+        const entity = this.characters.getEntity(sessionId);
+        if (entity && player.weapon !== entity.currentWeapon) {
+          entity.currentWeapon = player.weapon;
+          this.weapons.updateWeapon(sessionId, player.weapon);
+        }
+
+        // Death animation
+        if (entity && !player.alive && !entity.dead) {
+          this.characters.playDeath(sessionId);
+          this.weapons.removeWeapon(sessionId);
+          this.healthBars.removeBar(sessionId);
+        }
+
+        // Stun stars
+        if (entity) {
+          if (player.isStunned && !entity.stunGroup) {
+            this.characters.startStun(sessionId);
+          } else if (!player.isStunned && entity.stunGroup) {
+            this.characters.endStun(sessionId);
+          }
+        }
+
         if (this.localPlayer && sessionId === this.localSessionId) {
           this.localPlayer.entity.updateFromState(player);
           this.ui.updateHUD(player.hp, player.maxHp, (room.state as any).matchTimeRemaining);
+
+          // Update torch counter for samurai
+          if (player.role === "samurai") {
+            this.ui.updateTorchCount(player.torchesLeft);
+          }
+
+          // Cancel aiming/wind-up if stunned or dead
+          if (player.isStunned || !player.alive) {
+            this.localPlayer.cancelBomb();
+            this.localPlayer.cancelWindUp();
+          }
         }
       },
       onLampAdded: (lampId, lamp) => {
@@ -175,11 +238,15 @@ export class Game {
     });
     stateSync.listen();
 
-    // Sync phase if joining a game already in progress
-    const currentPhase = (room.state as any).phase;
-    if (currentPhase && currentPhase !== GamePhase.LOBBY) {
-      this.ui.onPhaseChange(currentPhase);
-    }
+    // React to phase changes (handles both late-join and normal GAME_START)
+    let lastPhase = "";
+    room.onStateChange(() => {
+      const phase = (room.state as any).phase as string;
+      if (phase && phase !== lastPhase) {
+        lastPhase = phase;
+        this.ui.onPhaseChange(phase);
+      }
+    });
 
     // 10. Debug panel
     new DebugPanel(this.weapons, this.inputSender);
@@ -196,7 +263,18 @@ export class Game {
   private gameLoop(deltaMs: number): void {
     if (this.localPlayer) {
       const yaw = this.sceneManager.getThirdPersonCamera().getYaw();
-      this.localPlayer.update(deltaMs, yaw);
+      const localEntity = this.characters.getEntity(this.localSessionId);
+      const px = localEntity ? localEntity.group.position.x : 0;
+      const pz = localEntity ? localEntity.group.position.z : 0;
+      this.localPlayer.update(deltaMs, yaw, px, pz);
+
+      // Update bomb selection HUD
+      const selected = this.localPlayer.getSelectedBomb();
+      if (selected) {
+        this.ui.showBombSelected(selected);
+      } else {
+        this.ui.hideBombSelected();
+      }
     }
 
     const localEntity = this.characters.getEntity(this.localSessionId);
@@ -205,6 +283,7 @@ export class Game {
     }
 
     this.characters.interpolateAll();
+    this.weapons.updateTorchFlicker();
 
     this.combat.update(deltaMs);
     this.effects.update(deltaMs);

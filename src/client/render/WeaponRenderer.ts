@@ -2,8 +2,9 @@ import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { CharacterRenderer } from "./CharacterRenderer.js";
 import { toonGradientMap } from "./ToonGradient.js";
+import { LIGHTING } from "../../shared/constants.js";
 
-type WeaponType = "katana" | "lance";
+type WeaponType = "katana" | "lance" | "torch";
 
 export interface SwingHandle {
   getBaseWorldPos(): THREE.Vector3;
@@ -33,9 +34,39 @@ const BOX_HALF_LENGTH = 1.0;
 
 type Keyframe = { t: number; pos: number[]; rot: number[] };
 
-function smoothstep(a: number, b: number, t: number): number {
+// ─── Easing functions ───────────────────────────────────────────────────────
+
+export type EasingName =
+  | "linear"
+  | "smoothstep"
+  | "easeInQuad"
+  | "easeOutQuad"
+  | "easeInOutCubic"
+  | "easeOutBack";
+
+const EASING_FNS: Record<EasingName, (t: number) => number> = {
+  linear: (t) => t,
+  smoothstep: (t) => t * t * (3 - 2 * t),
+  easeInQuad: (t) => t * t,
+  easeOutQuad: (t) => t * (2 - t),
+  easeInOutCubic: (t) =>
+    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+  easeOutBack: (t) => {
+    const c = 1.70158;
+    return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+  },
+};
+
+// ─── Swing config (mutable, tweakable from debug panel) ─────────────────────
+
+export const SWING_CONFIG = {
+  durationMs: 600,
+  easing: "easeOutQuad" as EasingName,
+};
+
+function applyEasing(a: number, b: number, t: number): number {
   const x = Math.max(0, Math.min(1, (t - a) / (b - a)));
-  return x * x * (3 - 2 * x);
+  return EASING_FNS[SWING_CONFIG.easing](x);
 }
 
 function lerpKeyframes(
@@ -48,7 +79,7 @@ function lerpKeyframes(
   }
   const kf0 = keyframes[i];
   const kf1 = keyframes[Math.min(i + 1, keyframes.length - 1)];
-  const localT = smoothstep(kf0.t, kf1.t, t);
+  const localT = applyEasing(kf0.t, kf1.t, t);
 
   return {
     pos: new THREE.Vector3(
@@ -77,8 +108,6 @@ export const SWING_A: Keyframe[] = [
   { t: 0.0, pos: REST_POS, rot: REST_ROT },
   { t: 0.15, pos: [-0.41, 1.01, -0.77], rot: [1.3, 1.16, 1.9] }, // wind-up far right
   { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
   { t: 1.0, pos: REST_POS, rot: REST_ROT },
 ];
 
@@ -102,6 +131,11 @@ interface WeaponEntry {
   tipLocalZ: number;
 }
 
+interface TorchExtras {
+  flame: THREE.Mesh;
+  light: THREE.PointLight;
+}
+
 export class WeaponRenderer {
   private characterRenderer: CharacterRenderer;
   private weapons = new Map<string, WeaponEntry>();
@@ -109,6 +143,9 @@ export class WeaponRenderer {
   private katanaModel: THREE.Group | null = null;
   /** Tracks next swing direction per player: true = Swing A (R→L), false = Swing B (L→R) */
   private nextSwingIsA = new Map<string, boolean>();
+  private torchExtras = new Map<string, TorchExtras>();
+  /** Players currently in wind-up pose (holding mouseDown) */
+  private windUpStates = new Map<string, { keyframes: Keyframe[] }>();
 
   constructor(characterRenderer: CharacterRenderer) {
     this.characterRenderer = characterRenderer;
@@ -185,6 +222,49 @@ export class WeaponRenderer {
       return;
     }
 
+    if (weaponType === "torch") {
+      const torchGroup = new THREE.Group();
+
+      // Stick
+      const stickGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6);
+      const stickMat = new THREE.MeshToonMaterial({
+        color: 0x5c3a1e,
+        gradientMap: toonGradientMap,
+      });
+      const stick = new THREE.Mesh(stickGeo, stickMat);
+      stick.castShadow = true;
+      torchGroup.add(stick);
+
+      // Flame
+      const flameGeo = new THREE.SphereGeometry(0.15, 8, 6);
+      const flameMat = new THREE.MeshBasicMaterial({ color: 0xff8833 });
+      const flame = new THREE.Mesh(flameGeo, flameMat);
+      flame.position.y = 0.55;
+      torchGroup.add(flame);
+
+      // PointLight at flame tip
+      const light = new THREE.PointLight(
+        LIGHTING.TORCH_LIGHT_COLOR,
+        LIGHTING.TORCH_LIGHT_INTENSITY,
+        LIGHTING.TORCH_LIGHT_RANGE,
+      );
+      light.position.y = 0.55;
+      torchGroup.add(light);
+
+      torchGroup.position.set(0.5, 1.0, -0.3);
+      torchGroup.rotation.set(0.3, 0, 0);
+      group.add(torchGroup);
+
+      this.weapons.set(sessionId, {
+        object: torchGroup,
+        type: "torch",
+        baseLocalZ: 0,
+        tipLocalZ: 0,
+      });
+      this.torchExtras.set(sessionId, { flame, light });
+      return;
+    }
+
     // Katana: use OBJ model or fallback box
     const restPos = REST_POS;
     const restRot = REST_ROT;
@@ -223,18 +303,64 @@ export class WeaponRenderer {
     this.nextSwingIsA.set(sessionId, true);
   }
 
+  /** Snap weapon to wind-up pose (called on mouseDown) */
+  startWindUp(sessionId: string): void {
+    const entry = this.weapons.get(sessionId);
+    if (!entry || entry.type === "torch") return;
+
+    if (entry.type === "lance") {
+      // Pull lance back
+      entry.object.rotation.x = LANCE_CONFIG.rotation.x + 0.4;
+      this.windUpStates.set(sessionId, { keyframes: [] });
+      return;
+    }
+
+    // Katana: snap to wind-up keyframe (keyframe[1])
+    const isA = this.nextSwingIsA.get(sessionId) ?? true;
+    const keyframes = isA ? SWING_A : SWING_B;
+    const windUp = keyframes[1];
+    entry.object.position.set(windUp.pos[0], windUp.pos[1], windUp.pos[2]);
+    entry.object.rotation.set(windUp.rot[0], windUp.rot[1], windUp.rot[2]);
+    this.windUpStates.set(sessionId, { keyframes });
+  }
+
+  /** Cancel wind-up, snap back to rest (e.g. stun, death, weapon switch) */
+  cancelWindUp(sessionId: string): void {
+    if (!this.windUpStates.has(sessionId)) return;
+    this.windUpStates.delete(sessionId);
+
+    const entry = this.weapons.get(sessionId);
+    if (!entry) return;
+
+    if (entry.type === "lance") {
+      entry.object.rotation.copy(LANCE_CONFIG.rotation);
+    } else if (entry.type === "katana") {
+      entry.object.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
+      entry.object.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+    }
+  }
+
   playSwing(sessionId: string): SwingHandle | null {
     const entry = this.weapons.get(sessionId);
     if (!entry) return null;
 
-    const start = performance.now();
+    if (entry.type === "torch") return null;
+
+    const fromWindUp = this.windUpStates.has(sessionId);
+    this.windUpStates.delete(sessionId);
+
+    const now = performance.now();
 
     if (entry.type === "lance") {
       const duration = 200;
-      const originalRotX = entry.object.rotation.x;
+      const startRotX = fromWindUp ? entry.object.rotation.x : LANCE_CONFIG.rotation.x;
+      const restRotX = LANCE_CONFIG.rotation.x;
+      const start = now;
       const swing = (): void => {
         const t = Math.min((performance.now() - start) / duration, 1);
-        entry.object.rotation.x = originalRotX + Math.sin(t * Math.PI) * -1.2;
+        // From current position, thrust forward then return to rest
+        const pullBack = fromWindUp ? 0.4 * (1 - t) : 0;
+        entry.object.rotation.x = restRotX + pullBack + Math.sin(t * Math.PI) * -1.2;
         if (t < 1) requestAnimationFrame(swing);
       };
       swing();
@@ -246,7 +372,10 @@ export class WeaponRenderer {
     const keyframes = isA ? SWING_A : SWING_B;
     this.nextSwingIsA.set(sessionId, !isA);
 
-    const duration = 400;
+    const duration = SWING_CONFIG.durationMs;
+    // If from wind-up, offset start so animation begins at t=0.15 (wind-up keyframe)
+    const windUpT = keyframes[1].t;
+    const start = fromWindUp ? now - windUpT * duration : now;
     this.activeSwings.set(sessionId, { start, duration });
 
     const obj = entry.object;
@@ -295,6 +424,16 @@ export class WeaponRenderer {
     }
   }
 
+  updateTorchFlicker(): void {
+    const time = performance.now() * 0.001;
+    for (const [, extras] of this.torchExtras) {
+      const flicker = 0.85 + 0.15 * Math.sin(time * 12 + Math.random() * 0.5);
+      extras.light.intensity = LIGHTING.TORCH_LIGHT_INTENSITY * flicker;
+      const scaleFlicker = 0.9 + 0.1 * Math.sin(time * 15);
+      extras.flame.scale.setScalar(scaleFlicker);
+    }
+  }
+
   removeWeapon(sessionId: string): void {
     const group = this.characterRenderer.getGroup(sessionId);
     const entry = this.weapons.get(sessionId);
@@ -305,6 +444,8 @@ export class WeaponRenderer {
     this.weapons.delete(sessionId);
     this.activeSwings.delete(sessionId);
     this.nextSwingIsA.delete(sessionId);
+    this.torchExtras.delete(sessionId);
+    this.windUpStates.delete(sessionId);
   }
 
   private disposeObject(obj: THREE.Object3D): void {

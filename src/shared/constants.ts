@@ -18,7 +18,7 @@ export const GAME = {
   SHOGUN_COUNT: 1,
   MATCH_DURATION_SEC: 300,
   TICK_RATE_MS: 50,
-  DEV_MIN_PLAYERS: 1,
+  DEV_MIN_PLAYERS: 3,
 };
 
 // Player stats by role
@@ -32,9 +32,10 @@ export const STATS = {
     waterBombCount: 9999,
     smokeBombCount: 2,
     grapplingHookCount: 1,
-    smokeBombRadius: 5,
-    smokeBombDurationMs: 6000,
+    smokeBombRadius: 6,
+    smokeBombDurationMs: 8000,
     waterBombBlastRadius: 3,
+    bombMaxThrowDist: 12,
   },
   samurai: {
     maxHp: 120,
@@ -46,6 +47,7 @@ export const STATS = {
     attackCooldownMs: 800,
     armorReduction: 0.25,
     torchRange: 12,
+    torchCount: 3,
   },
   shogun: {
     maxHp: 150,
@@ -61,10 +63,20 @@ export const STATS = {
 };
 
 export const LAMP = {
-  LIGHT_RADIUS: 10,
-  RELIGHT_TIME_MS: 2000,
+  LIGHT_RADIUS: 12,
+  RELIGHT_TIME_MS: 1000,
   RELIGHT_RANGE: 2.5,
   DEFAULT_HEIGHT: 3,
+};
+
+export const LIGHTING = {
+  AMBIENT_INTENSITY: 0.03,
+  MOON_INTENSITY: 0.12,
+  LAMP_POOL_INTENSITY: 5,
+  LAMP_POOL_RANGE: 12,
+  TORCH_LIGHT_INTENSITY: 1.2,
+  TORCH_LIGHT_RANGE: 12,
+  TORCH_LIGHT_COLOR: 0xff6622,
 };
 
 export const LAMP_POSITIONS: Array<{ id: string; x: number; z: number }> = [

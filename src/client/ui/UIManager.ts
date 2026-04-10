@@ -47,6 +47,14 @@ export class UIManager {
     this.roleSelect.setPlayerCount(count);
   }
 
+  showReadyButton(): void {
+    this.roleSelect.showReadyButton();
+  }
+
+  hideReadyButton(): void {
+    this.roleSelect.hideReadyButton();
+  }
+
   updateHUD(hp: number, maxHp: number, timeRemaining: number): void {
     this.hud.updateHealth(hp, maxHp);
     this.hud.updateTimer(timeRemaining);
@@ -59,6 +67,18 @@ export class UIManager {
 
   updateDebugCoords(x: number, y: number, z: number, rot: number): void {
     this.hud.updateDebugCoords(x, y, z, rot);
+  }
+
+  showBombSelected(kind: string): void {
+    this.hud.showBombSelected(kind);
+  }
+
+  hideBombSelected(): void {
+    this.hud.hideBombSelected();
+  }
+
+  updateTorchCount(count: number): void {
+    this.hud.updateTorchCount(count);
   }
 
   onReady(callback: () => void): void {

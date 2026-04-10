@@ -4,7 +4,7 @@ import { ProjectileState } from "../state/ProjectileState.js";
 import { PhysicsSystem } from "./PhysicsSystem.js";
 import { LightingSystem } from "./LightingSystem.js";
 import { STATS, LAMP } from "../../shared/constants.js";
-import { AbilityType, PlayerRole, ServerMsg } from "../../shared/types.js";
+import { AbilityType, PlayerRole, ServerMsg, WeaponType } from "../../shared/types.js";
 import type { Client, Room } from "@colyseus/core";
 
 let projectileCounter = 0;
@@ -48,9 +48,23 @@ export class AbilitySystem {
     }
   }
 
+  private clampTarget(playerX: number, playerZ: number, targetX: number, targetZ: number): { x: number; z: number } {
+    const dx = targetX - playerX;
+    const dz = targetZ - playerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const maxDist = STATS.ninja.bombMaxThrowDist;
+    if (dist > maxDist && dist > 0) {
+      const scale = maxDist / dist;
+      return { x: playerX + dx * scale, z: playerZ + dz * scale };
+    }
+    return { x: targetX, z: targetZ };
+  }
+
   private handleWaterBomb(player: PlayerState, targetX: number, targetZ: number, now: number): void {
     if (player.role !== PlayerRole.NINJA || player.waterBombsLeft <= 0) return;
     player.waterBombsLeft--;
+
+    const clamped = this.clampTarget(player.x, player.z, targetX, targetZ);
 
     const proj = new ProjectileState();
     proj.id = `wb_${++projectileCounter}`;
@@ -59,8 +73,8 @@ export class AbilitySystem {
     proj.x = player.x;
     proj.y = 1.5;
     proj.z = player.z;
-    proj.targetX = targetX;
-    proj.targetZ = targetZ;
+    proj.targetX = clamped.x;
+    proj.targetZ = clamped.z;
     proj.active = true;
     proj.startTime = now;
     proj.travelDurationMs = 800;
@@ -74,6 +88,8 @@ export class AbilitySystem {
     if (player.role !== PlayerRole.NINJA || player.smokeBombsLeft <= 0) return;
     player.smokeBombsLeft--;
 
+    const clamped = this.clampTarget(player.x, player.z, targetX, targetZ);
+
     const proj = new ProjectileState();
     proj.id = `sb_${++projectileCounter}`;
     proj.kind = "smoke_bomb";
@@ -81,8 +97,8 @@ export class AbilitySystem {
     proj.x = player.x;
     proj.y = 1.5;
     proj.z = player.z;
-    proj.targetX = targetX;
-    proj.targetZ = targetZ;
+    proj.targetX = clamped.x;
+    proj.targetZ = clamped.z;
     proj.active = true;
     proj.startTime = now;
     proj.travelDurationMs = 600;
@@ -169,21 +185,89 @@ export class AbilitySystem {
     });
   }
 
-  private handleTorchRelight(player: PlayerState, _now: number): void {
+  private handleTorchRelight(player: PlayerState, now: number): void {
     if (player.role !== PlayerRole.SAMURAI) return;
+    if (player.weapon !== WeaponType.TORCH) return;
+    if (player.torchesLeft <= 0) return;
+
+    // If already channeling, ignore
+    if (player.channelingLampId) return;
 
     const lamp = this.lighting.findNearestUnlitLamp(player.x, player.z, LAMP.RELIGHT_RANGE);
     if (!lamp) return;
 
-    // Instant relight for simplicity (could add channeling later)
-    this.lighting.relightLamp(lamp.id);
+    // Start channeling
+    player.channelingLampId = lamp.id;
+    player.channelingStartTime = now;
 
     this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
-      ability: AbilityType.TORCH_RELIGHT,
+      ability: AbilityType.TORCH_RELIGHT_START,
       casterSessionId: player.sessionId,
-      x: lamp.x,
-      z: lamp.z,
+      lampId: lamp.id,
+      duration: LAMP.RELIGHT_TIME_MS,
     });
+  }
+
+  updateChanneling(now: number): void {
+    this.state.players.forEach((player) => {
+      if (!player.channelingLampId) return;
+
+      // Validate channeling conditions
+      if (
+        !player.alive ||
+        player.isStunned ||
+        player.weapon !== WeaponType.TORCH
+      ) {
+        this.cancelChanneling(player);
+        return;
+      }
+
+      // Check range to lamp
+      const lamp = this.lighting.getLampState(player.channelingLampId);
+      if (!lamp || lamp.lit) {
+        this.cancelChanneling(player);
+        return;
+      }
+
+      const dSq = this.distSq(player.x, player.z, lamp.x, lamp.z);
+      if (dSq > LAMP.RELIGHT_RANGE * LAMP.RELIGHT_RANGE) {
+        this.cancelChanneling(player);
+        return;
+      }
+
+      // Check if channeling is complete
+      if (now - player.channelingStartTime >= LAMP.RELIGHT_TIME_MS) {
+        this.lighting.relightLamp(player.channelingLampId);
+        player.torchesLeft--;
+        this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+          ability: AbilityType.TORCH_RELIGHT,
+          casterSessionId: player.sessionId,
+          lampId: player.channelingLampId,
+          x: lamp.x,
+          z: lamp.z,
+        });
+        player.channelingLampId = null;
+        player.channelingStartTime = 0;
+      }
+    });
+  }
+
+  private cancelChanneling(player: PlayerState): void {
+    const lampId = player.channelingLampId;
+    player.channelingLampId = null;
+    player.channelingStartTime = 0;
+
+    this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+      ability: AbilityType.TORCH_RELIGHT_CANCEL,
+      casterSessionId: player.sessionId,
+      lampId,
+    });
+  }
+
+  private distSq(x1: number, z1: number, x2: number, z2: number): number {
+    const dx = x1 - x2;
+    const dz = z1 - z2;
+    return dx * dx + dz * dz;
   }
 
   updateProjectiles(deltaTime: number): void {
@@ -230,14 +314,15 @@ export class AbilitySystem {
       const lamp = this.lighting.findNearestLitLamp(proj.targetX, proj.targetZ, STATS.ninja.waterBombBlastRadius);
       if (lamp) {
         this.lighting.extinguishLamp(lamp.id);
-        this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
-          ability: AbilityType.WATER_BOMB,
-          casterSessionId: proj.ownerSessionId,
-          x: proj.targetX,
-          z: proj.targetZ,
-          radius: STATS.ninja.waterBombBlastRadius,
-        });
       }
+      // Always show splash effect on impact
+      this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+        ability: AbilityType.WATER_BOMB,
+        casterSessionId: proj.ownerSessionId,
+        x: proj.targetX,
+        z: proj.targetZ,
+        radius: STATS.ninja.waterBombBlastRadius,
+      });
     } else if (proj.kind === "smoke_bomb") {
       this.smokeZones.push({
         x: proj.targetX,

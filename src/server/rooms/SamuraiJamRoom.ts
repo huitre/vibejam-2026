@@ -67,7 +67,7 @@ export class SamuraiJamRoom extends Room<GameState> {
     this.onMessage(ClientMsg.SELECT_WEAPON, (client, data: SelectWeaponPayload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || player.role !== PlayerRole.SAMURAI) return;
-      if (data.weapon === WeaponType.KATANA || data.weapon === WeaponType.LANCE) {
+      if (data.weapon === WeaponType.KATANA || data.weapon === WeaponType.LANCE || data.weapon === WeaponType.TORCH) {
         player.weapon = data.weapon;
       }
     });
@@ -129,6 +129,7 @@ export class SamuraiJamRoom extends Room<GameState> {
     );
 
     this.ability.updateProjectiles(deltaTime);
+    this.ability.updateChanneling(now);
     this.winCondition.check(now);
   }
 
@@ -140,7 +141,7 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.maxHp = STATS.ninja.maxHp;
         player.hp = STATS.ninja.maxHp;
         player.weapon = WeaponType.KATANA;
-        player.x = 40; player.z = 3; player.y = 0;
+        player.x = 40; player.z = 50; player.y = 0;
         player.waterBombsLeft = STATS.ninja.waterBombCount;
         player.smokeBombsLeft = STATS.ninja.smokeBombCount;
         player.hasGrapplingHook = true;
@@ -149,15 +150,14 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.maxHp = STATS.samurai.maxHp;
         player.hp = STATS.samurai.maxHp;
         player.weapon = WeaponType.KATANA;
-        player.x = 20 + Math.random() * 40;
-        player.z = 30 + Math.random() * 40;
-        player.y = 0;
+        player.torchesLeft = STATS.samurai.torchCount;
+        player.x = 42; player.z = 50; player.y = 0;
         break;
       case PlayerRole.SHOGUN:
         player.maxHp = STATS.shogun.maxHp;
         player.hp = STATS.shogun.maxHp;
         player.weapon = WeaponType.KATANA;
-        player.x = 40; player.z = 85; player.y = 0;
+        player.x = 38; player.z = 50; player.y = 0;
         break;
     }
   }

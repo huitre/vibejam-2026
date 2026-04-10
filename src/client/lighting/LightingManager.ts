@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { LampObject } from "./LampObject.js";
-import { LAMP } from "../../shared/constants.js";
+import { LAMP, LIGHTING } from "../../shared/constants.js";
 import { toonGradientMap } from "../render/ToonGradient.js";
 
 /**
@@ -12,19 +12,25 @@ import { toonGradientMap } from "../render/ToonGradient.js";
 const POOL_SIZE = 8;
 const LIGHT_COLOR = 0xfff3ba;
 
+interface RelightingEntry {
+  startTime: number;
+  duration: number;
+}
+
 export class LightingManager {
   private scene: THREE.Scene;
   private lamps = new Map<string, LampObject>();
   private lampList: LampObject[] = [];
   private pool: THREE.PointLight[] = [];
   private lanternModel: THREE.Group | null = null;
+  private relightingLamps = new Map<string, RelightingEntry>();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
 
     // Create fixed pool of PointLights once
     for (let i = 0; i < POOL_SIZE; i++) {
-      const light = new THREE.PointLight(LIGHT_COLOR, 3, LAMP.LIGHT_RADIUS);
+      const light = new THREE.PointLight(LIGHT_COLOR, LIGHTING.LAMP_POOL_INTENSITY, LIGHTING.LAMP_POOL_RANGE);
       light.castShadow = false;
       light.position.set(0, -100, 0); // parked off-screen
       this.scene.add(light);
@@ -79,16 +85,44 @@ export class LightingManager {
     }
   }
 
+  startRelighting(lampId: string, duration: number): void {
+    this.relightingLamps.set(lampId, { startTime: performance.now(), duration });
+  }
+
+  cancelRelighting(lampId: string): void {
+    this.relightingLamps.delete(lampId);
+  }
+
+  completeRelighting(lampId: string): void {
+    this.relightingLamps.delete(lampId);
+  }
+
   /** Move pool lights to the nearest lit lamps around the player */
   updateShadowBudget(playerPos: THREE.Vector3): void {
+    const now = performance.now();
+
     // Sort lit lamps by distance to player
-    const litLamps: { lamp: LampObject; dist: number }[] = [];
+    const litLamps: { lamp: LampObject; dist: number; intensity: number }[] = [];
     for (const lamp of this.lampList) {
-      if (!lamp.getLit()) continue;
       const pos = lamp.getPosition();
       const dx = pos.x - playerPos.x;
       const dz = pos.z - playerPos.z;
-      litLamps.push({ lamp, dist: dx * dx + dz * dz });
+      const dist = dx * dx + dz * dz;
+
+      if (lamp.getLit()) {
+        litLamps.push({ lamp, dist, intensity: LIGHTING.LAMP_POOL_INTENSITY });
+        continue;
+      }
+
+      // Check if this lamp is being relit (gradual intensity)
+      const lampId = this.getLampId(lamp);
+      if (lampId) {
+        const entry = this.relightingLamps.get(lampId);
+        if (entry) {
+          const progress = Math.min(1, (now - entry.startTime) / entry.duration);
+          litLamps.push({ lamp, dist, intensity: LIGHTING.LAMP_POOL_INTENSITY * progress });
+        }
+      }
     }
     litLamps.sort((a, b) => a.dist - b.dist);
 
@@ -98,12 +132,19 @@ export class LightingManager {
       if (i < litLamps.length) {
         const pos = litLamps[i].lamp.getPosition();
         light.position.set(pos.x, litLamps[i].lamp.lampY, pos.z);
-        light.intensity = 3;
+        light.intensity = litLamps[i].intensity;
       } else {
         light.position.set(0, -100, 0);
         light.intensity = 0;
       }
     }
+  }
+
+  private getLampId(lamp: LampObject): string | null {
+    for (const [id, l] of this.lamps) {
+      if (l === lamp) return id;
+    }
+    return null;
   }
 
   getLamp(id: string): LampObject | undefined {

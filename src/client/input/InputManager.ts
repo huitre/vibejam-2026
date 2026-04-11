@@ -4,6 +4,7 @@ export class InputManager {
   private keys = new Set<string>();
   private bindings: KeyBindings = DEFAULT_BINDINGS;
   private justPressed = new Set<string>();
+  private justReleased = new Set<string>();
 
   constructor() {
     window.addEventListener("keydown", (e) => {
@@ -14,6 +15,7 @@ export class InputManager {
     });
     window.addEventListener("keyup", (e) => {
       this.keys.delete(e.code);
+      this.justReleased.add(e.code);
     });
     window.addEventListener("mousedown", (e) => {
       const btn = e.button === 0 ? "MouseLeft" : e.button === 2 ? "MouseRight" : `Mouse${e.button}`;
@@ -25,6 +27,7 @@ export class InputManager {
     window.addEventListener("mouseup", (e) => {
       const btn = e.button === 0 ? "MouseLeft" : e.button === 2 ? "MouseRight" : `Mouse${e.button}`;
       this.keys.delete(btn);
+      this.justReleased.add(btn);
     });
     window.addEventListener("contextmenu", (e) => e.preventDefault());
   }
@@ -49,8 +52,13 @@ export class InputManager {
     return this.justPressed.has(key);
   }
 
+  wasJustReleased(key: string): boolean {
+    return this.justReleased.has(key);
+  }
+
   clearJustPressed(): void {
     this.justPressed.clear();
+    this.justReleased.clear();
   }
 
   getBindings(): KeyBindings {

@@ -43,7 +43,7 @@ export class RoleSelectScreen {
     this.readyBtn.style.cssText = `
       padding: 12px 40px; font-size: 22px; background: #cc2222; color: white;
       border: 2px solid #ff4444; cursor: pointer; border-radius: 4px;
-      font-weight: bold; letter-spacing: 2px;
+      font-weight: bold; letter-spacing: 2px; display: none;
     `;
     this.container.appendChild(this.readyBtn);
 
@@ -59,6 +59,14 @@ export class RoleSelectScreen {
 
   setPlayerCount(count: number): void {
     this.playerCountLabel.textContent = `Joueurs connectes : ${count}/10`;
+  }
+
+  showReadyButton(): void {
+    this.readyBtn.style.display = "";
+  }
+
+  hideReadyButton(): void {
+    this.readyBtn.style.display = "none";
   }
 
   onReady(callback: () => void): void {

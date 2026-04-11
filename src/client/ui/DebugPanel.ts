@@ -1,5 +1,6 @@
 import GUI from "lil-gui";
-import { REST_POS, REST_ROT, SWING_A, SWING_B } from "../render/WeaponRenderer.js";
+import { REST_POS, REST_ROT, SWING_A, SWING_B, SWING_CONFIG } from "../render/WeaponRenderer.js";
+import type { EasingName } from "../render/WeaponRenderer.js";
 import type { WeaponRenderer } from "../render/WeaponRenderer.js";
 import type { InputSender } from "../network/InputSender.js";
 
@@ -37,6 +38,13 @@ export class DebugPanel {
     rotFolder.add(restRotProxy, "rx", -Math.PI, Math.PI, 0.01).onChange(updateRest);
     rotFolder.add(restRotProxy, "ry", -Math.PI, Math.PI, 0.01).onChange(updateRest);
     rotFolder.add(restRotProxy, "rz", -Math.PI, Math.PI, 0.01).onChange(updateRest);
+
+    // ── Swing Config ──────────────────────────────────────────────────────
+    const swingConfigFolder = this.gui.addFolder("Swing Config");
+    swingConfigFolder.add(SWING_CONFIG, "durationMs", 100, 1500, 10).name("Duration (ms)");
+    swingConfigFolder.add(SWING_CONFIG, "easing", [
+      "linear", "smoothstep", "easeInQuad", "easeOutQuad", "easeInOutCubic", "easeOutBack",
+    ] as EasingName[]).name("Easing");
 
     // ── Swing A keyframes (indices 1-3: wind-up, mid, follow-through) ─────
     const swingAFolder = this.gui.addFolder("Swing A");

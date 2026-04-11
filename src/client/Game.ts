@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { SceneManager } from "./render/SceneManager.js";
 import { CharacterRenderer } from "./render/CharacterRenderer.js";
 import { WeaponRenderer } from "./render/WeaponRenderer.js";
@@ -39,6 +40,12 @@ export class Game {
   private localPlayer!: LocalPlayer;
   private localSessionId = "";
   private localRole = "";
+  private portalGroup!: THREE.Group;
+  private portalRingMat!: THREE.MeshBasicMaterial;
+  private portalRedirecting = false;
+
+  private static readonly PORTAL_POS = new THREE.Vector3(40, 0, 2);
+  private static readonly PORTAL_RADIUS = 3;
 
   async start(): Promise<void> {
     // 1. Initialize Three.js
@@ -64,6 +71,9 @@ export class Game {
     this.waterBomb = new WaterBombVisual(scene);
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
+
+    // 3. Build exit portal (Vibe Jam 2026)
+    this.buildPortal(scene);
 
     // 4. Input
     this.inputManager = new InputManager();
@@ -298,6 +308,68 @@ export class Game {
       this.lighting.updateShadowBudget(localEntity.group.position);
       const p = localEntity.group.position;
       this.ui.updateDebugCoords(p.x, p.y, p.z, localEntity.currentRot);
+
+      // Portal proximity check
+      this.checkPortalProximity(p);
+    }
+
+    // Animate portal glow
+    this.updatePortal();
+  }
+
+  private buildPortal(scene: THREE.Scene): void {
+    const pos = Game.PORTAL_POS;
+    this.portalGroup = new THREE.Group();
+    this.portalGroup.position.set(pos.x, pos.y, pos.z);
+
+    // Torii gate pillars
+    const pillarGeo = new THREE.CylinderGeometry(0.2, 0.2, 4, 8);
+    const pillarMat = new THREE.MeshToonMaterial({ color: 0xcc2222 });
+    const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
+    leftPillar.position.set(-1.5, 2, 0);
+    this.portalGroup.add(leftPillar);
+    const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
+    rightPillar.position.set(1.5, 2, 0);
+    this.portalGroup.add(rightPillar);
+
+    // Top beam
+    const beamGeo = new THREE.BoxGeometry(4, 0.3, 0.3);
+    const beamMat = new THREE.MeshToonMaterial({ color: 0xcc2222 });
+    const topBeam = new THREE.Mesh(beamGeo, beamMat);
+    topBeam.position.set(0, 4, 0);
+    this.portalGroup.add(topBeam);
+
+    // Glowing inner ring (portal effect)
+    const ringGeo = new THREE.TorusGeometry(1.2, 0.15, 8, 32);
+    this.portalRingMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.7 });
+    const ring = new THREE.Mesh(ringGeo, this.portalRingMat);
+    ring.position.set(0, 2.2, 0);
+    ring.name = "portalRing";
+    this.portalGroup.add(ring);
+
+    // Portal light
+    const portalLight = new THREE.PointLight(0x4488ff, 2, 8);
+    portalLight.position.set(0, 2.2, 0);
+    this.portalGroup.add(portalLight);
+
+    scene.add(this.portalGroup);
+  }
+
+  private updatePortal(): void {
+    const ring = this.portalGroup.getObjectByName("portalRing");
+    if (ring) {
+      ring.rotation.z = performance.now() * 0.001;
+      this.portalRingMat.opacity = 0.5 + Math.sin(performance.now() * 0.003) * 0.3;
+    }
+  }
+
+  private checkPortalProximity(playerPos: THREE.Vector3): void {
+    if (this.portalRedirecting) return;
+    const dx = playerPos.x - Game.PORTAL_POS.x;
+    const dz = playerPos.z - Game.PORTAL_POS.z;
+    if (dx * dx + dz * dz < Game.PORTAL_RADIUS * Game.PORTAL_RADIUS) {
+      this.portalRedirecting = true;
+      window.location.href = "https://vibej.am/portal/2026";
     }
   }
 }

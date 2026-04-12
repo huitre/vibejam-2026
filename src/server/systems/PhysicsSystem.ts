@@ -75,6 +75,24 @@ export class PhysicsSystem {
     return false;
   }
 
+  getNearestWallPoint(x: number, z: number): { wx: number; wz: number } | null {
+    let bestDistSq = Infinity;
+    let bestX = x;
+    let bestZ = z;
+    for (const wall of WALL_COLLIDERS) {
+      const cx = Math.max(wall.minX, Math.min(x, wall.maxX));
+      const cz = Math.max(wall.minZ, Math.min(z, wall.maxZ));
+      const dSq = (x - cx) ** 2 + (z - cz) ** 2;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        bestX = cx;
+        bestZ = cz;
+      }
+    }
+    if (bestDistSq === Infinity) return null;
+    return { wx: bestX, wz: bestZ };
+  }
+
   getPlayersInRadius(state: GameState, x: number, z: number, radius: number): PlayerState[] {
     const result: PlayerState[] = [];
     const radiusSq = radius * radius;

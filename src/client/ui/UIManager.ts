@@ -1,3 +1,4 @@
+import { RoomLobbyScreen } from "./RoomLobbyScreen.js";
 import { RoleSelectScreen } from "./RoleSelectScreen.js";
 import { HUD } from "./HUD.js";
 import { GameOverScreen } from "./GameOverScreen.js";
@@ -5,6 +6,7 @@ import { GamePhase } from "../../shared/types.js";
 
 export class UIManager {
   private root: HTMLElement;
+  private roomLobby: RoomLobbyScreen;
   private roleSelect: RoleSelectScreen;
   private hud: HUD;
   private gameOver: GameOverScreen;
@@ -12,18 +14,24 @@ export class UIManager {
 
   constructor() {
     this.root = document.getElementById("ui-root")!;
+    this.roomLobby = new RoomLobbyScreen(this.root);
     this.roleSelect = new RoleSelectScreen(this.root);
     this.hud = new HUD(this.root);
     this.gameOver = new GameOverScreen(this.root);
 
-    this.roleSelect.show();
+    this.roomLobby.show();
+  }
+
+  private hideAll(): void {
+    this.roomLobby.hide();
+    this.roleSelect.hide();
+    this.hud.hide();
+    this.gameOver.hide();
   }
 
   onPhaseChange(phase: string): void {
     this.currentPhase = phase;
-    this.roleSelect.hide();
-    this.hud.hide();
-    this.gameOver.hide();
+    this.hideAll();
 
     switch (phase) {
       case GamePhase.LOBBY:
@@ -36,6 +44,19 @@ export class UIManager {
         this.gameOver.show();
         break;
     }
+  }
+
+  getRoomLobby(): RoomLobbyScreen {
+    return this.roomLobby;
+  }
+
+  showRoomLobby(): void {
+    this.hideAll();
+    this.roomLobby.show();
+  }
+
+  getGameOver(): GameOverScreen {
+    return this.gameOver;
   }
 
   setRole(role: string): void {

@@ -216,6 +216,12 @@ export class CharacterRenderer {
     this.entities.delete(sessionId);
   }
 
+  removeAll(): void {
+    for (const sessionId of [...this.entities.keys()]) {
+      this.removePlayer(sessionId);
+    }
+  }
+
   updatePlayer(sessionId: string, x: number, y: number, z: number, rotation: number): void {
     const entity = this.entities.get(sessionId);
     if (!entity) return;

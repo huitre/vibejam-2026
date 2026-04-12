@@ -36,6 +36,12 @@ export enum ClientMsg {
   DEBUG_NOCLIP = "debug_noclip",
 }
 
+export interface SamuraiJamRoomMetadata {
+  roomName: string;
+  phase: string;
+  playerCount: number;
+}
+
 export enum ServerMsg {
   ROLE_ASSIGNED = "role_assigned",
   GAME_START = "game_start",

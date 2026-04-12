@@ -46,6 +46,10 @@ export class HealthBar {
     this.bars.delete(sessionId);
   }
 
+  removeAll(): void {
+    this.bars.clear();
+  }
+
   // Make health bars face camera each frame
   updateBillboards(camera: THREE.Camera): void {
     this.bars.forEach(({ bg, fill }) => {

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Room } from "colyseus.js";
 import { SceneManager } from "./render/SceneManager.js";
 import { CharacterRenderer } from "./render/CharacterRenderer.js";
 import { WeaponRenderer } from "./render/WeaponRenderer.js";
@@ -16,6 +17,7 @@ import { SmokeBombVisual } from "./abilities/SmokeBombVisual.js";
 import { WaterBombVisual } from "./abilities/WaterBombVisual.js";
 import { TorchVisual } from "./abilities/TorchVisual.js";
 import { ChargeVisual } from "./abilities/ChargeVisual.js";
+import { GrapplingHookVisual } from "./abilities/GrapplingHookVisual.js";
 import { LocalPlayer } from "./entities/LocalPlayer.js";
 import { DebugPanel } from "./ui/DebugPanel.js";
 import { ServerMsg, PlayerRole, AbilityType, GamePhase } from "../shared/types.js";
@@ -37,12 +39,17 @@ export class Game {
   private waterBomb!: WaterBombVisual;
   private torchVisual!: TorchVisual;
   private chargeVisual!: ChargeVisual;
+  private grapplingHook!: GrapplingHookVisual;
   private localPlayer!: LocalPlayer;
   private localSessionId = "";
   private localRole = "";
   private portalGroup!: THREE.Group;
   private portalRingMat!: THREE.MeshBasicMaterial;
   private portalRedirecting = false;
+
+  private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private stateSync: StateSync | null = null;
+  private debugPanel: DebugPanel | null = null;
 
   private static readonly PORTAL_POS = new THREE.Vector3(40, 0, 2);
   private static readonly PORTAL_RADIUS = 3;
@@ -71,6 +78,7 @@ export class Game {
     this.waterBomb = new WaterBombVisual(scene);
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
+    this.grapplingHook = new GrapplingHookVisual(scene);
 
     // 3. Build exit portal (Vibe Jam 2026)
     this.buildPortal(scene);
@@ -78,18 +86,88 @@ export class Game {
     // 4. Input
     this.inputManager = new InputManager();
 
-    // 5. UI
+    // 5. UI — shows RoomLobbyScreen by default
     this.ui = new UIManager();
 
-    // 6. Connect to server
+    // 6. Network manager (no connection yet)
     this.network = new NetworkManager();
-    const room = await this.network.connect();
+
+    // 7. Bind lobby callbacks
+    const lobby = this.ui.getRoomLobby();
+    lobby.onCreate(async () => {
+      try {
+        const room = await this.network.createRoom();
+        this.onRoomJoined(room);
+      } catch (err) {
+        console.warn("[Game] Failed to create room:", err);
+      }
+    });
+    lobby.onJoin(async (roomId: string) => {
+      try {
+        const room = await this.network.joinRoom(roomId);
+        this.onRoomJoined(room);
+      } catch (err) {
+        console.warn("[Game] Failed to join room:", err);
+        this.refreshRoomList();
+      }
+    });
+    lobby.onQuickPlay(async () => {
+      try {
+        const room = await this.network.connect();
+        this.onRoomJoined(room);
+      } catch (err) {
+        console.warn("[Game] Quick play failed:", err);
+      }
+    });
+
+    // 8. Start polling room list
+    this.startPolling();
+
+    // 9. Start render loop (3D scene rotates behind overlay)
+    this.sceneManager.startLoop((dt) => this.gameLoop(dt));
+  }
+
+  private startPolling(): void {
+    this.refreshRoomList();
+    this.pollingTimer = setInterval(() => this.refreshRoomList(), 3000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollingTimer !== null) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
+    }
+  }
+
+  private async refreshRoomList(): Promise<void> {
+    try {
+      const rooms = await this.network.getAvailableRooms();
+      this.ui.getRoomLobby().updateRoomList(
+        rooms.map((r) => ({
+          roomId: r.roomId,
+          metadata: r.metadata!,
+          clients: r.clients,
+          maxClients: r.maxClients,
+        }))
+      );
+    } catch (err) {
+      console.warn("[Game] Failed to fetch room list:", err);
+    }
+  }
+
+  private onRoomJoined(room: Room): void {
+    this.stopPolling();
     this.localSessionId = room.sessionId;
 
-    // 7. Input sender
+    // Switch to RoleSelectScreen
+    this.ui.onPhaseChange(GamePhase.LOBBY);
+
+    // Input sender
     this.inputSender = new InputSender(room);
 
-    // 8. Listen for server messages
+    const scene = this.sceneManager.getScene();
+
+    // Listen for server messages
     room.onMessage(ServerMsg.ROLE_ASSIGNED, (data: { role: string }) => {
       this.localRole = data.role;
       this.ui.setRole(data.role);
@@ -119,7 +197,6 @@ export class Game {
     });
 
     room.onMessage(ServerMsg.ATTACK_RESULT, (data: any) => {
-      // Remote players' attacks (local player already shows slash immediately)
       const attacker = this.characters.getEntity(data.attackerSessionId);
       if (attacker) {
         const pos = attacker.group.position;
@@ -148,6 +225,13 @@ export class Game {
           }
           break;
         }
+        case AbilityType.GRAPPLING_HOOK:
+          this.grapplingHook.launch(
+            data.casterSessionId,
+            data.startX, data.startZ,
+            data.wallX, data.wallZ, data.wallY,
+          );
+          break;
         case AbilityType.TORCH_RELIGHT_START:
           this.lighting.startRelighting(data.lampId, data.duration);
           break;
@@ -164,8 +248,8 @@ export class Game {
       this.ui.showGameOver(data.winner);
     });
 
-    // 9. State sync
-    const stateSync = new StateSync(room, {
+    // State sync
+    this.stateSync = new StateSync(room, {
       onPlayerAdded: (sessionId, player) => {
         this.characters.addPlayer(sessionId, player.role, player.x, player.y, player.z);
         const entity = this.characters.getEntity(sessionId);
@@ -194,21 +278,18 @@ export class Game {
         this.characters.updatePlayer(sessionId, player.x, player.y, player.z, player.rotationY);
         this.healthBars.updateBar(sessionId, player.hp, player.maxHp);
 
-        // Detect weapon change and update visual
         const entity = this.characters.getEntity(sessionId);
         if (entity && player.weapon !== entity.currentWeapon) {
           entity.currentWeapon = player.weapon;
           this.weapons.updateWeapon(sessionId, player.weapon);
         }
 
-        // Death animation
         if (entity && !player.alive && !entity.dead) {
           this.characters.playDeath(sessionId);
           this.weapons.removeWeapon(sessionId);
           this.healthBars.removeBar(sessionId);
         }
 
-        // Stun stars
         if (entity) {
           if (player.isStunned && !entity.stunGroup) {
             this.characters.startStun(sessionId);
@@ -221,12 +302,10 @@ export class Game {
           this.localPlayer.entity.updateFromState(player);
           this.ui.updateHUD(player.hp, player.maxHp, (room.state as any).matchTimeRemaining);
 
-          // Update torch counter for samurai
           if (player.role === "samurai") {
             this.ui.updateTorchCount(player.torchesLeft);
           }
 
-          // Cancel aiming/wind-up if stunned or dead
           if (player.isStunned || !player.alive) {
             this.localPlayer.cancelBomb();
             this.localPlayer.cancelWindUp();
@@ -246,9 +325,9 @@ export class Game {
         this.effects.removeProjectile(id);
       },
     });
-    stateSync.listen();
+    this.stateSync.listen();
 
-    // React to phase changes (handles both late-join and normal GAME_START)
+    // React to phase changes
     let lastPhase = "";
     room.onStateChange(() => {
       const phase = (room.state as any).phase as string;
@@ -258,16 +337,40 @@ export class Game {
       }
     });
 
-    // 10. Debug panel
-    new DebugPanel(this.weapons, this.inputSender);
+    // Debug panel
+    this.debugPanel = new DebugPanel(this.weapons, this.inputSender);
 
-    // 11. Ready button
+    // Ready button
     this.ui.onReady(() => {
       this.inputSender.sendReady();
     });
 
-    // 11. Start game loop
-    this.sceneManager.startLoop((dt) => this.gameLoop(dt));
+    // Return to lobby from game over
+    this.ui.getGameOver().onReturn(() => {
+      this.returnToLobby();
+    });
+  }
+
+  private returnToLobby(): void {
+    // Disconnect from current room
+    this.network.disconnect();
+
+    // Clean up all entities
+    this.characters.removeAll();
+    this.healthBars.removeAll();
+    this.weapons.removeAll();
+
+    // Reset local state
+    this.localPlayer = null!;
+    this.localSessionId = "";
+    this.localRole = "";
+    this.stateSync = null;
+
+    // Show room lobby
+    this.ui.showRoomLobby();
+
+    // Restart polling
+    this.startPolling();
   }
 
   private gameLoop(deltaMs: number): void {
@@ -278,7 +381,6 @@ export class Game {
       const pz = localEntity ? localEntity.group.position.z : 0;
       this.localPlayer.update(deltaMs, yaw, px, pz);
 
-      // Update bomb selection HUD
       const selected = this.localPlayer.getSelectedBomb();
       if (selected) {
         this.ui.showBombSelected(selected);
@@ -301,6 +403,13 @@ export class Game {
     this.waterBomb.update(deltaMs);
     this.torchVisual.update(deltaMs);
     this.chargeVisual.update(deltaMs);
+
+    // Update grappling hook animation (follow caster entity)
+    if (this.grapplingHook.isActive()) {
+      const casterId = this.grapplingHook.getActiveCaster();
+      const casterEntity = casterId ? this.characters.getEntity(casterId) : null;
+      this.grapplingHook.update(deltaMs, casterEntity ? casterEntity.group : null);
+    }
 
     this.healthBars.updateBillboards(this.sceneManager.getThirdPersonCamera().getCamera());
 

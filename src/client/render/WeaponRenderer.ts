@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CharacterRenderer } from "./CharacterRenderer.js";
 import { toonGradientMap } from "./ToonGradient.js";
 import { LIGHTING } from "../../shared/constants.js";
@@ -11,13 +12,6 @@ export interface SwingHandle {
   getTipWorldPos(): THREE.Vector3;
   isActive(): boolean;
 }
-
-const LANCE_CONFIG = {
-  geometry: new THREE.CylinderGeometry(0.03, 0.03, 2.0, 6),
-  color: 0x8b4513,
-  offset: new THREE.Vector3(0.5, 1.4, -0.5),
-  rotation: new THREE.Euler(0.5, 0, 0),
-};
 
 // Katana OBJ bounding box (from Blender export)
 const OBJ_CENTER_X = 9.55;
@@ -141,15 +135,20 @@ export class WeaponRenderer {
   private weapons = new Map<string, WeaponEntry>();
   private activeSwings = new Map<string, { start: number; duration: number }>();
   private katanaModel: THREE.Group | null = null;
+  private naginataModel: THREE.Group | null = null;
+  private naginataTipZ = -2.5;
+  private torchModel: THREE.Group | null = null;
   /** Tracks next swing direction per player: true = Swing A (R→L), false = Swing B (L→R) */
   private nextSwingIsA = new Map<string, boolean>();
   private torchExtras = new Map<string, TorchExtras>();
   /** Players currently in wind-up pose (holding mouseDown) */
-  private windUpStates = new Map<string, { keyframes: Keyframe[] }>();
+  private windUpStates = new Map<string, { keyframes: Keyframe[]; animating: boolean }>();
 
   constructor(characterRenderer: CharacterRenderer) {
     this.characterRenderer = characterRenderer;
     this.loadKatanaModel();
+    this.loadNaginataModel();
+    this.loadTorchModel();
   }
 
   private async loadKatanaModel(): Promise<void> {
@@ -192,6 +191,112 @@ export class WeaponRenderer {
     }
   }
 
+  private async loadNaginataModel(): Promise<void> {
+    try {
+      const [gltf, diffuse, normal] = await Promise.all([
+        new GLTFLoader().loadAsync("/naginata.glb"),
+        new THREE.TextureLoader().loadAsync("/naginata_texture_diffuse.jpg"),
+        new THREE.TextureLoader().loadAsync("/naginata_texture_normal.jpg"),
+      ]);
+
+      diffuse.colorSpace = THREE.SRGBColorSpace;
+      normal.colorSpace = THREE.LinearSRGBColorSpace;
+      diffuse.flipY = false;
+      normal.flipY = false;
+
+      const model = gltf.scene;
+      model.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.material = new THREE.MeshToonMaterial({
+            map: diffuse,
+            normalMap: normal,
+            gradientMap: toonGradientMap,
+          });
+          child.castShadow = true;
+        }
+      });
+
+      // Normalize: orient along local -Z (blade forward), hilt at origin
+      // Measure native bounding box
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      // Scale so longest axis is ~2.5 units (polearm is longer than katana)
+      const targetLength = 2.5;
+      const scale = targetLength / maxDim;
+      model.scale.setScalar(scale);
+
+      // Recompute after scaling
+      const scaledBox = new THREE.Box3().setFromObject(model);
+      const center = scaledBox.getCenter(new THREE.Vector3());
+
+      // Rotate so the model's longest axis aligns with local -Z
+      // Assume the naginata's longest axis is Y (vertical in Blender)
+      model.rotation.x = -Math.PI / 2;
+
+      // Recompute after rotation
+      const rotatedBox = new THREE.Box3().setFromObject(model);
+      const rotatedSize = rotatedBox.getSize(new THREE.Vector3());
+
+      // Shift so hilt end is near z=0 and blade extends into -Z
+      model.position.z = -rotatedBox.min.z;
+      model.position.y = 0;
+      model.position.x = 0;
+
+      // Tip is at the far -Z end
+      const finalBox = new THREE.Box3().setFromObject(model);
+      this.naginataTipZ = finalBox.min.z;
+
+      this.naginataModel = model;
+      console.log(`[WeaponRenderer] Naginata loaded, tipZ=${this.naginataTipZ.toFixed(2)}, size=${rotatedSize.x.toFixed(2)}x${rotatedSize.y.toFixed(2)}x${rotatedSize.z.toFixed(2)}`);
+    } catch (e) {
+      console.warn("Failed to load naginata.glb, using fallback cylinder", e);
+    }
+  }
+
+  private async loadTorchModel(): Promise<void> {
+    try {
+      const [gltf, diffuse, normal] = await Promise.all([
+        new GLTFLoader().loadAsync("/torch.glb"),
+        new THREE.TextureLoader().loadAsync("/torch_texture_diffuse.jpg"),
+        new THREE.TextureLoader().loadAsync("/torch_texture_normal.jpg"),
+      ]);
+
+      diffuse.colorSpace = THREE.SRGBColorSpace;
+      normal.colorSpace = THREE.LinearSRGBColorSpace;
+      diffuse.flipY = false;
+      normal.flipY = false;
+
+      const model = gltf.scene;
+      model.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.material = new THREE.MeshToonMaterial({
+            map: diffuse,
+            normalMap: normal,
+            gradientMap: toonGradientMap,
+          });
+          child.castShadow = true;
+        }
+      });
+
+      // Normalize size: fit model to ~1.0 unit tall
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = 1.0 / maxDim;
+      model.scale.setScalar(scale);
+
+      // Re-center so base is at y=0
+      const scaledBox = new THREE.Box3().setFromObject(model);
+      model.position.y = -scaledBox.min.y;
+
+      this.torchModel = model;
+    } catch (e) {
+      console.warn("Failed to load torch.glb, using fallback geometry", e);
+    }
+  }
+
   updateWeapon(sessionId: string, weaponType: WeaponType): void {
     const group = this.characterRenderer.getGroup(sessionId);
     if (!group) return;
@@ -204,38 +309,60 @@ export class WeaponRenderer {
     }
 
     if (weaponType === "lance") {
-      const mat = new THREE.MeshToonMaterial({
-        color: LANCE_CONFIG.color,
-        gradientMap: toonGradientMap,
-      });
-      const mesh = new THREE.Mesh(LANCE_CONFIG.geometry.clone(), mat);
-      mesh.position.copy(LANCE_CONFIG.offset);
-      mesh.rotation.copy(LANCE_CONFIG.rotation);
-      mesh.castShadow = true;
-      group.add(mesh);
-      this.weapons.set(sessionId, {
-        object: mesh,
-        type: "lance",
-        baseLocalZ: 1.0,
-        tipLocalZ: -1.0,
-      });
+      if (this.naginataModel) {
+        const clone = this.naginataModel.clone(true);
+        clone.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
+        clone.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+        group.add(clone);
+        this.weapons.set(sessionId, {
+          object: clone,
+          type: "lance",
+          baseLocalZ: 0,
+          tipLocalZ: this.naginataTipZ,
+        });
+      } else {
+        // Fallback cylinder
+        const geo = new THREE.CylinderGeometry(0.03, 0.03, 2.5, 6);
+        geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshToonMaterial({
+          color: 0x8b4513,
+          gradientMap: toonGradientMap,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
+        mesh.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+        mesh.castShadow = true;
+        group.add(mesh);
+        this.weapons.set(sessionId, {
+          object: mesh,
+          type: "lance",
+          baseLocalZ: 1.25,
+          tipLocalZ: -1.25,
+        });
+      }
+      this.nextSwingIsA.set(sessionId, true);
       return;
     }
 
     if (weaponType === "torch") {
       const torchGroup = new THREE.Group();
 
-      // Stick
-      const stickGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6);
-      const stickMat = new THREE.MeshToonMaterial({
-        color: 0x5c3a1e,
-        gradientMap: toonGradientMap,
-      });
-      const stick = new THREE.Mesh(stickGeo, stickMat);
-      stick.castShadow = true;
-      torchGroup.add(stick);
+      if (this.torchModel) {
+        const clone = this.torchModel.clone(true);
+        torchGroup.add(clone);
+      } else {
+        // Fallback procedural geometry
+        const stickGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6);
+        const stickMat = new THREE.MeshToonMaterial({
+          color: 0x5c3a1e,
+          gradientMap: toonGradientMap,
+        });
+        const stick = new THREE.Mesh(stickGeo, stickMat);
+        stick.castShadow = true;
+        torchGroup.add(stick);
+      }
 
-      // Flame
+      // Flame (always added on top for flicker effect)
       const flameGeo = new THREE.SphereGeometry(0.15, 8, 6);
       const flameMat = new THREE.MeshBasicMaterial({ color: 0xff8833 });
       const flame = new THREE.Mesh(flameGeo, flameMat);
@@ -303,25 +430,53 @@ export class WeaponRenderer {
     this.nextSwingIsA.set(sessionId, true);
   }
 
-  /** Snap weapon to wind-up pose (called on mouseDown) */
+  /** Interpolate weapon from rest to wind-up pose (called on mouseDown) */
   startWindUp(sessionId: string): void {
     const entry = this.weapons.get(sessionId);
     if (!entry || entry.type === "torch") return;
 
-    if (entry.type === "lance") {
-      // Pull lance back
-      entry.object.rotation.x = LANCE_CONFIG.rotation.x + 0.4;
-      this.windUpStates.set(sessionId, { keyframes: [] });
-      return;
-    }
-
-    // Katana: snap to wind-up keyframe (keyframe[1])
     const isA = this.nextSwingIsA.get(sessionId) ?? true;
     const keyframes = isA ? SWING_A : SWING_B;
     const windUp = keyframes[1];
-    entry.object.position.set(windUp.pos[0], windUp.pos[1], windUp.pos[2]);
-    entry.object.rotation.set(windUp.rot[0], windUp.rot[1], windUp.rot[2]);
-    this.windUpStates.set(sessionId, { keyframes });
+
+    const state = { keyframes, animating: true };
+    this.windUpStates.set(sessionId, state);
+
+    // Interpolate from rest to wind-up over 150ms
+    const duration = 150;
+    const start = performance.now();
+    const obj = entry.object;
+    const startPos = [REST_POS[0], REST_POS[1], REST_POS[2]];
+    const startRot = [REST_ROT[0], REST_ROT[1], REST_ROT[2]];
+    const endPos = windUp.pos;
+    const endRot = windUp.rot;
+
+    const animate = (): void => {
+      // Stop if wind-up was cancelled or consumed by playSwing
+      const current = this.windUpStates.get(sessionId);
+      if (!current || !current.animating) return;
+
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const eased = EASING_FNS.smoothstep(t);
+
+      obj.position.set(
+        startPos[0] + (endPos[0] - startPos[0]) * eased,
+        startPos[1] + (endPos[1] - startPos[1]) * eased,
+        startPos[2] + (endPos[2] - startPos[2]) * eased,
+      );
+      obj.rotation.set(
+        startRot[0] + (endRot[0] - startRot[0]) * eased,
+        startRot[1] + (endRot[1] - startRot[1]) * eased,
+        startRot[2] + (endRot[2] - startRot[2]) * eased,
+      );
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        state.animating = false;
+      }
+    };
+    animate();
   }
 
   /** Cancel wind-up, snap back to rest (e.g. stun, death, weapon switch) */
@@ -332,9 +487,7 @@ export class WeaponRenderer {
     const entry = this.weapons.get(sessionId);
     if (!entry) return;
 
-    if (entry.type === "lance") {
-      entry.object.rotation.copy(LANCE_CONFIG.rotation);
-    } else if (entry.type === "katana") {
+    if (entry.type === "katana" || entry.type === "lance") {
       entry.object.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
       entry.object.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
     }
@@ -351,23 +504,7 @@ export class WeaponRenderer {
 
     const now = performance.now();
 
-    if (entry.type === "lance") {
-      const duration = 200;
-      const startRotX = fromWindUp ? entry.object.rotation.x : LANCE_CONFIG.rotation.x;
-      const restRotX = LANCE_CONFIG.rotation.x;
-      const start = now;
-      const swing = (): void => {
-        const t = Math.min((performance.now() - start) / duration, 1);
-        // From current position, thrust forward then return to rest
-        const pullBack = fromWindUp ? 0.4 * (1 - t) : 0;
-        entry.object.rotation.x = restRotX + pullBack + Math.sin(t * Math.PI) * -1.2;
-        if (t < 1) requestAnimationFrame(swing);
-      };
-      swing();
-      return null;
-    }
-
-    // Katana: pick alternating keyframes
+    // Both katana and lance (naginata) use keyframe swing with SwingHandle
     const isA = this.nextSwingIsA.get(sessionId) ?? true;
     const keyframes = isA ? SWING_A : SWING_B;
     this.nextSwingIsA.set(sessionId, !isA);
@@ -417,7 +554,7 @@ export class WeaponRenderer {
         }));
 
     for (const { key, entry } of entries) {
-      if (!entry || entry.type !== "katana") continue;
+      if (!entry || (entry.type !== "katana" && entry.type !== "lance")) continue;
       if (this.activeSwings.has(key)) continue;
       entry.object.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
       entry.object.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
@@ -446,6 +583,12 @@ export class WeaponRenderer {
     this.nextSwingIsA.delete(sessionId);
     this.torchExtras.delete(sessionId);
     this.windUpStates.delete(sessionId);
+  }
+
+  removeAll(): void {
+    for (const sessionId of [...this.weapons.keys()]) {
+      this.removeWeapon(sessionId);
+    }
   }
 
   private disposeObject(obj: THREE.Object3D): void {

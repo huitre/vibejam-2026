@@ -115,8 +115,23 @@ export class AbilitySystem {
     player.isClimbing = true;
     player.hasGrapplingHook = false;
 
-    // Simulate climbing over 1.5 seconds
     const climbHeight = 6; // wall height
+    const wallPt = this.physics.getNearestWallPoint(player.x, player.z);
+    const wallX = wallPt ? wallPt.wx : player.x;
+    const wallZ = wallPt ? wallPt.wz : player.z;
+
+    // Broadcast at START so clients can play the full animation
+    this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+      ability: AbilityType.GRAPPLING_HOOK,
+      casterSessionId: player.sessionId,
+      startX: player.x,
+      startZ: player.z,
+      wallX,
+      wallZ,
+      wallY: climbHeight,
+    });
+
+    // Simulate climbing over 1.5 seconds
     const steps = 15;
     const stepDuration = 100;
     let step = 0;
@@ -133,13 +148,6 @@ export class AbilitySystem {
         const dirZ = Math.cos(player.rotationY);
         player.x += dirX * 2;
         player.z += dirZ * 2;
-
-        this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
-          ability: AbilityType.GRAPPLING_HOOK,
-          casterSessionId: player.sessionId,
-          x: player.x,
-          z: player.z,
-        });
       }
     }, stepDuration);
   }

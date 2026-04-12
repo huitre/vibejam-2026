@@ -14,6 +14,9 @@ import type { MovePayload, AttackPayload, UseAbilityPayload, SelectWeaponPayload
 export class SamuraiJamRoom extends Room<GameState> {
   maxClients = GAME.MAX_PLAYERS;
 
+  private static roomCounter = 0;
+  private displayName!: string;
+
   private physics!: PhysicsSystem;
   private combat!: CombatSystem;
   private ability!: AbilitySystem;
@@ -24,9 +27,13 @@ export class SamuraiJamRoom extends Room<GameState> {
   private ninjaAssigned = false;
   private shogunAssigned = false;
   private samuraiCount = 0;
+  private lastMetadataPhase = "";
 
   onCreate(_options: any): void {
+    SamuraiJamRoom.roomCounter++;
+    this.displayName = `Dojo #${SamuraiJamRoom.roomCounter}`;
     this.setState(new GameState());
+    this.setMetadata({ roomName: this.displayName, phase: GamePhase.LOBBY, playerCount: 0 });
 
     this.physics = new PhysicsSystem();
     this.lighting = new LightingSystem(this.state);
@@ -107,6 +114,7 @@ export class SamuraiJamRoom extends Room<GameState> {
 
     this.state.players.set(client.sessionId, player);
     client.send(ServerMsg.ROLE_ASSIGNED, { role: player.role });
+    this.setMetadata({ playerCount: this.state.players.size });
     console.log(`[Room] Player joined: ${client.sessionId} as ${player.role} (total: ${this.state.players.size})`);
   }
 
@@ -118,9 +126,16 @@ export class SamuraiJamRoom extends Room<GameState> {
       else this.samuraiCount--;
     }
     this.state.players.delete(client.sessionId);
+    this.setMetadata({ playerCount: this.state.players.size });
   }
 
   private update(deltaTime: number): void {
+    // Track phase changes for metadata
+    if (this.state.phase !== this.lastMetadataPhase) {
+      this.lastMetadataPhase = this.state.phase;
+      this.setMetadata({ phase: this.state.phase });
+    }
+
     if (this.state.phase !== GamePhase.PLAYING) return;
 
     const now = Date.now();

@@ -2,6 +2,8 @@ export class GameOverScreen {
   private container: HTMLDivElement;
   private titleLabel: HTMLDivElement;
   private subtitleLabel: HTMLDivElement;
+  private returnBtn: HTMLButtonElement;
+  private returnCallback: (() => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement("div");
@@ -16,8 +18,21 @@ export class GameOverScreen {
     this.container.appendChild(this.titleLabel);
 
     this.subtitleLabel = document.createElement("div");
-    this.subtitleLabel.style.cssText = "font-size: 24px; color: #aaa;";
+    this.subtitleLabel.style.cssText = "font-size: 24px; color: #aaa; margin-bottom: 30px;";
     this.container.appendChild(this.subtitleLabel);
+
+    this.returnBtn = document.createElement("button");
+    this.returnBtn.textContent = "RETOUR AU LOBBY";
+    this.returnBtn.style.cssText = `
+      padding: 12px 36px; font-size: 20px; background: #2266cc; color: white;
+      border: 2px solid #4488ee; cursor: pointer; border-radius: 4px;
+      font-weight: bold; letter-spacing: 2px;
+    `;
+    this.returnBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.returnCallback?.();
+    });
+    this.container.appendChild(this.returnBtn);
 
     parent.appendChild(this.container);
     this.container.style.display = "none";
@@ -33,6 +48,10 @@ export class GameOverScreen {
       this.titleLabel.style.color = "#ffcc00";
       this.subtitleLabel.textContent = "Le Shogun est sauf.";
     }
+  }
+
+  onReturn(callback: () => void): void {
+    this.returnCallback = callback;
   }
 
   show(): void { this.container.style.display = "flex"; }

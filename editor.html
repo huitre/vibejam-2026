@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SamuraiJam - Level Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', sans-serif; display: flex; color: #e0e0e0; }
+
+    #sidebar {
+      width: 280px;
+      min-width: 280px;
+      height: 100vh;
+      background: #16213e;
+      display: flex;
+      flex-direction: column;
+      border-right: 2px solid #0f3460;
+      overflow: hidden;
+    }
+
+    #sidebar h2 {
+      padding: 12px 16px;
+      margin: 0;
+      font-size: 16px;
+      background: #0f3460;
+      color: #e94560;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #preview-container {
+      padding: 8px;
+      text-align: center;
+      border-bottom: 1px solid #0f3460;
+      min-height: 80px;
+    }
+
+    #preview-container img {
+      max-width: 256px;
+      max-height: 256px;
+      border: 1px solid #0f3460;
+      background: #1a1a2e;
+    }
+
+    #selected-info {
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #aaa;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    #controls {
+      padding: 8px 16px;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #controls label {
+      font-size: 12px;
+      color: #aaa;
+    }
+
+    #controls input[type="number"] {
+      width: 60px;
+      padding: 4px;
+      background: #1a1a2e;
+      border: 1px solid #0f3460;
+      color: #e0e0e0;
+      border-radius: 3px;
+    }
+
+    #controls .grid-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #controls button, #model-list button {
+      cursor: pointer;
+    }
+
+    #controls button {
+      padding: 6px 10px;
+      background: #0f3460;
+      color: #e0e0e0;
+      border: 1px solid #533483;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    #controls button:hover {
+      background: #533483;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    #model-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px;
+    }
+
+    #model-list button {
+      display: block;
+      width: 100%;
+      padding: 6px 12px;
+      margin-bottom: 2px;
+      background: transparent;
+      color: #e0e0e0;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    #model-list button:hover {
+      background: #0f3460;
+    }
+
+    #model-list button.active {
+      background: #533483;
+      border-color: #e94560;
+    }
+
+    #editor-canvas {
+      display: block;
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h2>Level Editor</h2>
+    <div id="preview-container"></div>
+    <div id="selected-info">No model selected</div>
+    <div id="controls">
+      <div class="grid-row">
+        <label>Width:</label>
+        <input type="number" id="grid-width" value="40" min="4" max="200" />
+        <label>Depth:</label>
+        <input type="number" id="grid-depth" value="40" min="4" max="200" />
+        <button id="btn-apply-grid">Apply</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-export">Export JSON</button>
+        <button id="btn-import">Import JSON</button>
+        <button id="btn-clear">Clear All</button>
+      </div>
+    </div>
+    <div id="shortcuts" style="padding:6px 16px;font-size:11px;color:#666;border-bottom:1px solid #0f3460;">
+      X/Y/Z = rotate axis | Esc = deselect | Right-click = delete
+    </div>
+    <div id="model-list"></div>
+  </div>
+  <canvas id="editor-canvas"></canvas>
+  <input type="file" id="file-import" accept=".json" style="display:none" />
+  <script type="module" src="/src/editor/main.ts"></script>
+</body>
+</html>

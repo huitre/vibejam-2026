@@ -16,8 +16,16 @@ interface SmokeZone {
   expiresAt: number;
 }
 
+interface CaltropZone {
+  x: number;
+  z: number;
+  radius: number;
+  expiresAt: number;
+}
+
 export class AbilitySystem {
   private smokeZones: SmokeZone[] = [];
+  private caltropZones: CaltropZone[] = [];
 
   constructor(
     private state: GameState,
@@ -44,6 +52,9 @@ export class AbilitySystem {
         break;
       case AbilityType.TORCH_RELIGHT:
         this.handleTorchRelight(player, now);
+        break;
+      case AbilityType.CALTROPS:
+        this.handleCaltrops(player, now);
         break;
     }
   }
@@ -202,6 +213,28 @@ export class AbilitySystem {
     });
   }
 
+  private handleCaltrops(player: PlayerState, now: number): void {
+    if (player.role !== PlayerRole.NINJA || player.caltropsLeft <= 0) return;
+    player.caltropsLeft--;
+
+    const radius = STATS.ninja.caltropsRadius;
+    this.caltropZones.push({
+      x: player.x,
+      z: player.z,
+      radius,
+      expiresAt: now + STATS.ninja.caltropsDurationMs,
+    });
+
+    this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+      ability: AbilityType.CALTROPS,
+      casterSessionId: player.sessionId,
+      x: player.x,
+      z: player.z,
+      radius,
+      duration: STATS.ninja.caltropsDurationMs,
+    });
+  }
+
   private handleTorchRelight(player: PlayerState, now: number): void {
     if (player.role !== PlayerRole.SAMURAI) return;
     if (player.weapon !== WeaponType.TORCH) return;
@@ -317,6 +350,9 @@ export class AbilitySystem {
     // Update smoke zones
     this.updateSmokeZones(now);
 
+    // Update caltrop zones
+    this.updateCaltropZones(now);
+
     // Update stun timers
     this.state.players.forEach((player) => {
       if (player.isStunned && now >= player.stunUntil) {
@@ -357,6 +393,39 @@ export class AbilitySystem {
         duration: STATS.ninja.smokeBombDurationMs,
       });
     }
+  }
+
+  private updateCaltropZones(now: number): void {
+    this.caltropZones = this.caltropZones.filter((z) => z.expiresAt > now);
+
+    this.state.players.forEach((player) => {
+      if (!player.alive) return;
+      let slowed = false;
+      for (const zone of this.caltropZones) {
+        const dx = player.x - zone.x;
+        const dz = player.z - zone.z;
+        if (dx * dx + dz * dz <= zone.radius * zone.radius) {
+          slowed = true;
+          break;
+        }
+      }
+      player.slowFactor = slowed ? STATS.ninja.caltropsSlowFactor : 1;
+    });
+  }
+
+  updateStealth(): void {
+    this.state.players.forEach((player) => {
+      if (!player.alive) {
+        player.isInStealth = false;
+        return;
+      }
+      if (player.role !== PlayerRole.NINJA) {
+        player.isInStealth = false;
+        return;
+      }
+      const nearLamp = this.lighting.findNearestLitLamp(player.x, player.z, LAMP.LIGHT_RADIUS);
+      player.isInStealth = nearLamp === null;
+    });
   }
 
   private updateSmokeZones(now: number): void {

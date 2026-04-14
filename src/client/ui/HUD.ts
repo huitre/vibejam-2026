@@ -9,6 +9,8 @@ export class HUD {
   private healthBar: HTMLDivElement;
   private healthFill: HTMLDivElement;
   private healthText: HTMLDivElement;
+  private staminaBar: HTMLDivElement;
+  private staminaFill: HTMLDivElement;
   private timerLabel: HTMLDivElement;
   private roleIndicator: HTMLDivElement;
   private controlsHelp: HTMLDivElement;
@@ -40,6 +42,14 @@ export class HUD {
     this.healthText.style.cssText = "font-size: 14px; color: white; margin-top: 3px; text-shadow: 1px 1px 2px black;";
     healthContainer.appendChild(this.healthText);
 
+    this.staminaBar = document.createElement("div");
+    this.staminaBar.style.cssText = "width: 200px; height: 12px; background: #333; border: 2px solid #666; border-radius: 3px; overflow: hidden; margin-top: 4px;";
+
+    this.staminaFill = document.createElement("div");
+    this.staminaFill.style.cssText = "width: 100%; height: 100%; background: linear-gradient(to right, #0088cc, #00ccff); transition: width 0.2s;";
+    this.staminaBar.appendChild(this.staminaFill);
+    healthContainer.appendChild(this.staminaBar);
+
     this.container.appendChild(healthContainer);
 
     // Timer (top-center)
@@ -57,7 +67,7 @@ export class HUD {
       position: absolute; bottom: 20px; left: 20px;
       font-size: 13px; color: #888; line-height: 1.6; text-shadow: 1px 1px 2px black;
     `;
-    this.controlsHelp.innerHTML = "WASD - Deplacement | Clic - Attaque<br>Q - Ability 1 | E - Ability 2 | R - Ability 3<br>F - Interagir | T - Changer arme";
+    this.controlsHelp.innerHTML = "WASD - Deplacement | Clic - Attaque | Shift - Sprint<br>Q - Ability 1 | E - Ability 2 | R - Ability 3<br>C - Caltrops | F - Interagir | T - Changer arme";
     this.container.appendChild(this.controlsHelp);
 
     // Debug coords (top-right)
@@ -110,6 +120,11 @@ export class HUD {
     this.healthFill.style.background = `rgb(${r}, ${g}, 50)`;
 
     this.healthText.textContent = `${hp} / ${maxHp}`;
+  }
+
+  updateStamina(stamina: number, maxStamina: number): void {
+    const pct = Math.max(0, (stamina / maxStamina) * 100);
+    this.staminaFill.style.width = `${pct}%`;
   }
 
   updateTimer(seconds: number): void {

@@ -49,14 +49,15 @@ export class LocalPlayer {
   }
 
   update(deltaMs: number, cameraYaw: number, playerWorldX: number, playerWorldZ: number): void {
+    const bindings = this.input.getBindings();
     const moveDir = this.input.getMovementDirection();
-    this.sender.update(deltaMs, moveDir, cameraYaw);
+    const isMoving = moveDir.dx !== 0 || moveDir.dz !== 0;
+    const wantsSprint = this.input.isPressed(bindings.sprint) && isMoving;
+    this.sender.update(deltaMs, moveDir, cameraYaw, wantsSprint);
 
     if (this.attackCooldown > 0) {
       this.attackCooldown = Math.max(0, this.attackCooldown - deltaMs);
     }
-
-    const bindings = this.input.getBindings();
 
     // --- Ninja bomb selection (E = water, R = smoke) ---
     if (this.entity.role === PlayerRole.NINJA) {
@@ -135,6 +136,12 @@ export class LocalPlayer {
     }
 
     // --- Non-bomb abilities ---
+    if (this.input.wasJustPressed(bindings.caltrops)) {
+      if (this.entity.role === PlayerRole.NINJA) {
+        this.sender.sendAbility(AbilityType.CALTROPS);
+      }
+    }
+
     if (this.input.wasJustPressed(bindings.ability1)) {
       if (this.entity.role === PlayerRole.NINJA) {
         this.sender.sendAbility(AbilityType.GRAPPLING_HOOK);

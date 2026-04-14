@@ -18,6 +18,7 @@ import { WaterBombVisual } from "./abilities/WaterBombVisual.js";
 import { TorchVisual } from "./abilities/TorchVisual.js";
 import { ChargeVisual } from "./abilities/ChargeVisual.js";
 import { GrapplingHookVisual } from "./abilities/GrapplingHookVisual.js";
+import { CaltropVisual } from "./abilities/CaltropVisual.js";
 import { LocalPlayer } from "./entities/LocalPlayer.js";
 import { DebugPanel } from "./ui/DebugPanel.js";
 import { ServerMsg, PlayerRole, AbilityType, GamePhase } from "../shared/types.js";
@@ -40,6 +41,7 @@ export class Game {
   private torchVisual!: TorchVisual;
   private chargeVisual!: ChargeVisual;
   private grapplingHook!: GrapplingHookVisual;
+  private caltropVisual!: CaltropVisual;
   private localPlayer!: LocalPlayer;
   private localSessionId = "";
   private localRole = "";
@@ -79,6 +81,7 @@ export class Game {
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
     this.grapplingHook = new GrapplingHookVisual(scene);
+    this.caltropVisual = new CaltropVisual(scene);
 
     // 3. Build exit portal (Vibe Jam 2026)
     this.buildPortal(scene);
@@ -241,6 +244,9 @@ export class Game {
         case AbilityType.TORCH_RELIGHT:
           this.lighting.completeRelighting(data.lampId);
           break;
+        case AbilityType.CALTROPS:
+          this.caltropVisual.createCaltrops(data.x, data.z, data.radius, data.duration);
+          break;
       }
     });
 
@@ -296,11 +302,15 @@ export class Game {
           } else if (!player.isStunned && entity.stunGroup) {
             this.characters.endStun(sessionId);
           }
+
+          if (player.role === PlayerRole.NINJA) {
+            this.characters.setStealth(sessionId, player.isInStealth);
+          }
         }
 
         if (this.localPlayer && sessionId === this.localSessionId) {
           this.localPlayer.entity.updateFromState(player);
-          this.ui.updateHUD(player.hp, player.maxHp, (room.state as any).matchTimeRemaining);
+          this.ui.updateHUD(player.hp, player.maxHp, (room.state as any).matchTimeRemaining, player.stamina, player.maxStamina);
 
           if (player.role === "samurai") {
             this.ui.updateTorchCount(player.torchesLeft);
@@ -403,6 +413,7 @@ export class Game {
     this.waterBomb.update(deltaMs);
     this.torchVisual.update(deltaMs);
     this.chargeVisual.update(deltaMs);
+    this.caltropVisual.update(deltaMs);
 
     // Update grappling hook animation (follow caster entity)
     if (this.grapplingHook.isActive()) {

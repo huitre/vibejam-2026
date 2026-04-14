@@ -25,6 +25,7 @@ export enum AbilityType {
   TORCH_RELIGHT_START = "torch_relight_start",
   TORCH_RELIGHT_CANCEL = "torch_relight_cancel",
   SHOGUN_CHARGE = "shogun_charge",
+  CALTROPS = "caltrops",
 }
 
 export enum ClientMsg {

@@ -2,6 +2,7 @@ export interface MovePayload {
   dx: number;
   dz: number;
   rotationY: number;
+  sprint?: boolean;
 }
 
 export interface AttackPayload {

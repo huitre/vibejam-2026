@@ -10,13 +10,14 @@ export class InputSender {
     this.room = room;
   }
 
-  update(deltaMs: number, moveDir: { dx: number; dz: number }, rotationY: number): void {
+  update(deltaMs: number, moveDir: { dx: number; dz: number }, rotationY: number, sprint: boolean = false): void {
     this.timeSinceLastSend += deltaMs;
     if (this.timeSinceLastSend >= this.sendInterval) {
       this.room.send(ClientMsg.MOVE, {
         dx: moveDir.dx,
         dz: moveDir.dz,
         rotationY,
+        sprint,
       });
       this.timeSinceLastSend = 0;
     }

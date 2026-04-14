@@ -331,6 +331,21 @@ export class CharacterRenderer {
     return this.entities.get(sessionId);
   }
 
+  setStealth(sessionId: string, isStealth: boolean): void {
+    const entity = this.entities.get(sessionId);
+    if (!entity || entity.dead) return;
+
+    entity.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mat = child.material;
+        if (mat instanceof THREE.Material) {
+          mat.transparent = true;
+          mat.opacity = isStealth ? 0.3 : 1.0;
+        }
+      }
+    });
+  }
+
   getGroup(sessionId: string): THREE.Group | undefined {
     return this.entities.get(sessionId)?.group;
   }

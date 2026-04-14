@@ -28,12 +28,29 @@ export class PhysicsSystem {
     }
   }
 
-  applyMovement(player: PlayerState, dx: number, dz: number, rotationY: number, deltaMs: number): void {
+  applyMovement(player: PlayerState, dx: number, dz: number, rotationY: number, deltaMs: number, wantsSprint: boolean = false): void {
     if (!player.alive || player.isStunned) return;
 
     const stats = STATS[player.role as keyof typeof STATS];
-    const speed = ('moveSpeed' in stats) ? stats.moveSpeed : 5;
+    let speed = ('moveSpeed' in stats) ? stats.moveSpeed : 5;
     const dt = deltaMs / 1000;
+    const moving = dx !== 0 || dz !== 0;
+
+    // Sprint: boost speed and drain stamina
+    if (wantsSprint && moving && player.stamina > 0) {
+      speed *= stats.sprintMultiplier;
+      player.stamina = Math.max(0, player.stamina - Math.round(stats.staminaDrain * dt));
+      if (!player.isSprinting) {
+        player.isSprinting = true;
+      }
+    } else {
+      if (player.isSprinting) {
+        player.isSprinting = false;
+        player.sprintStoppedAt = Date.now();
+      }
+    }
+
+    speed *= player.slowFactor;
 
     // Camera-relative movement: forward is +Z in local space (camera behind at -Z)
     // Forward vector at yaw phi: (sin(phi), 0, cos(phi))
@@ -156,6 +173,18 @@ export class PhysicsSystem {
       }
     });
     return result;
+  }
+
+  updateStamina(state: GameState, deltaMs: number): void {
+    const now = Date.now();
+    const dt = deltaMs / 1000;
+    state.players.forEach((player) => {
+      if (!player.alive || player.isSprinting) return;
+      if (player.stamina >= player.maxStamina) return;
+      const stats = STATS[player.role as keyof typeof STATS];
+      if (now - player.sprintStoppedAt < stats.staminaRegenDelay) return;
+      player.stamina = Math.min(player.maxStamina, player.stamina + Math.round(stats.staminaRegen * dt));
+    });
   }
 
   getPlayersInCone(

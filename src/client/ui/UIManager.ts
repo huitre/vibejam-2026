@@ -76,9 +76,10 @@ export class UIManager {
     this.roleSelect.hideReadyButton();
   }
 
-  updateHUD(hp: number, maxHp: number, timeRemaining: number): void {
+  updateHUD(hp: number, maxHp: number, timeRemaining: number, stamina: number, maxStamina: number): void {
     this.hud.updateHealth(hp, maxHp);
     this.hud.updateTimer(timeRemaining);
+    this.hud.updateStamina(stamina, maxStamina);
   }
 
   showGameOver(winner: string): void {

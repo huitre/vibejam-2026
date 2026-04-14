@@ -17,13 +17,20 @@ export class PlayerState extends Schema {
   @type("boolean") isClimbing: boolean = false;
   @type("int32") lastAttackTime: number = 0;
   @type("int16") torchesLeft: number = 0;
+  @type("int16") stamina: number = 100;
+  @type("int16") maxStamina: number = 100;
+  @type("boolean") isSprinting: boolean = false;
+  @type("boolean") isInStealth: boolean = false;
+  @type("float32") slowFactor: number = 1;
 
   // Server-only (not synced)
   waterBombsLeft: number = 0;
   smokeBombsLeft: number = 0;
   hasGrapplingHook: boolean = false;
   chargeCooldownUntil: number = 0;
+  sprintStoppedAt: number = 0;
   stunUntil: number = 0;
   channelingLampId: string | null = null;
   channelingStartTime: number = 0;
+  caltropsLeft: number = 0;
 }

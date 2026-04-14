@@ -103,7 +103,10 @@ export class SamuraiJamRoom extends Room<GameState> {
       player.rotationY = data.rotationY;
       // Only apply movement if there's actual input
       if (data.dx !== 0 || data.dz !== 0) {
-        this.physics.applyMovement(player, data.dx, data.dz, data.rotationY, GAME.TICK_RATE_MS);
+        this.physics.applyMovement(player, data.dx, data.dz, data.rotationY, GAME.TICK_RATE_MS, !!data.sprint);
+      } else if (player.isSprinting) {
+        player.isSprinting = false;
+        player.sprintStoppedAt = Date.now();
       }
     });
 
@@ -195,6 +198,8 @@ export class SamuraiJamRoom extends Room<GameState> {
 
     this.ability.updateProjectiles(deltaTime);
     this.ability.updateChanneling(now);
+    this.ability.updateStealth();
+    this.physics.updateStamina(this.state, deltaTime);
     this.winCondition.check(now);
   }
 
@@ -217,6 +222,9 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.waterBombsLeft = STATS.ninja.waterBombCount;
         player.smokeBombsLeft = STATS.ninja.smokeBombCount;
         player.hasGrapplingHook = true;
+        player.stamina = STATS.ninja.maxStamina;
+        player.maxStamina = STATS.ninja.maxStamina;
+        player.caltropsLeft = STATS.ninja.caltropsCount;
         break;
       case PlayerRole.SAMURAI:
         player.maxHp = STATS.samurai.maxHp;
@@ -224,12 +232,16 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.weapon = WeaponType.KATANA;
         player.torchesLeft = STATS.samurai.torchCount;
         player.x = spawn.x; player.z = spawn.z; player.y = 0;
+        player.stamina = STATS.samurai.maxStamina;
+        player.maxStamina = STATS.samurai.maxStamina;
         break;
       case PlayerRole.SHOGUN:
         player.maxHp = STATS.shogun.maxHp;
         player.hp = STATS.shogun.maxHp;
         player.weapon = WeaponType.KATANA;
         player.x = spawn.x; player.z = spawn.z; player.y = 0;
+        player.stamina = STATS.shogun.maxStamina;
+        player.maxStamina = STATS.shogun.maxStamina;
         break;
     }
   }

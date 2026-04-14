@@ -9,6 +9,8 @@ export interface KeyBindings {
   ability3: string;
   interact: string;
   switchWeapon: string;
+  sprint: string;
+  caltrops: string;
 }
 
 export const DEFAULT_BINDINGS: KeyBindings = {
@@ -22,4 +24,6 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   ability3: "KeyR",
   interact: "KeyF",
   switchWeapon: "KeyT",
+  sprint: "ShiftLeft",
+  caltrops: "KeyC",
 };

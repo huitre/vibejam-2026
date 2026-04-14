@@ -66,11 +66,13 @@ export class Game {
     this.lighting = new LightingManager(scene);
     this.characters = new CharacterRenderer(scene);
     this.effects = new EffectRenderer(scene);
+    this.caltropVisual = new CaltropVisual(scene);
     await Promise.all([
       MapBuilder.build(scene),
       this.lighting.loadModel(),
       this.characters.loadModel(),
       this.effects.loadModels(),
+      this.caltropVisual.loadModel(),
     ]);
     this.weapons = new WeaponRenderer(this.characters);
     this.combat = new CombatVisuals(scene);
@@ -81,7 +83,6 @@ export class Game {
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
     this.grapplingHook = new GrapplingHookVisual(scene);
-    this.caltropVisual = new CaltropVisual(scene);
 
     // 3. Build exit portal (Vibe Jam 2026)
     this.buildPortal(scene);

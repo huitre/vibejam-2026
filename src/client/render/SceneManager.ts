@@ -9,6 +9,7 @@ export class SceneManager {
   private outlineEffect!: OutlineEffect;
   private thirdPersonCamera!: ThirdPersonCamera;
   private clock = new THREE.Clock();
+  private statsEl!: HTMLDivElement;
 
   initialize(): void {
     this.scene = new THREE.Scene();
@@ -47,6 +48,13 @@ export class SceneManager {
 
     this.thirdPersonCamera = new ThirdPersonCamera(canvas);
 
+    // Triangle counter overlay
+    this.statsEl = document.createElement("div");
+    this.statsEl.style.cssText =
+      "position:fixed;top:4px;right:4px;padding:4px 8px;background:rgba(0,0,0,0.7);" +
+      "color:#0f0;font:12px monospace;z-index:100;pointer-events:none;";
+    document.body.appendChild(this.statsEl);
+
     window.addEventListener("resize", () => {
       this.thirdPersonCamera.updateAspect(window.innerWidth / window.innerHeight);
       this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -60,6 +68,10 @@ export class SceneManager {
       this.thirdPersonCamera.update(deltaSec);
       onUpdate(deltaSec * 1000);
       this.outlineEffect.render(this.scene, this.thirdPersonCamera.getCamera());
+
+      const info = this.renderer.info;
+      this.statsEl.textContent =
+        `Tris: ${info.render.triangles.toLocaleString()} | Draw: ${info.render.calls} | Geo: ${info.memory.geometries}`;
     };
     loop();
   }

@@ -1,20 +1,74 @@
-import * as THREE from 'three';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import * as THREE from "three";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-const MODEL_COUNT = 156;
-const TEXTURE_BASE = '/buildings/';
+/** OBJ models in /map_pieces/ (loaded with MTL + fallback texture) */
+const OBJ_MODELS = [
+  "base_map",
+  "bridge",
+  "castle_wall_corner",
+  "castle_tower",
+  "corner_tower",
+  "front_gate",
+  "gate_big",
+  "gate_door",
+  "tower",
+  "tree_1",
+  "castle_wall",
+  "wall_corner_l",
+  "wall_corner_m",
+  "wall_l",
+  "wall_m",
+  "water_bridge",
+  "water_canal",
+  "water_canal_s",
+  "water_corner",
+  "water_end",
+  "well",
+];
+
+/** GLB models in /public root (keep their own materials) */
+const GLB_MODELS = ["lantern", "basin", "tree", "torch"];
+
+interface ModelDef {
+  name: string;
+  type: "obj" | "glb";
+  path: string;
+}
+
+function buildModelDefs(): ModelDef[] {
+  const defs: ModelDef[] = [];
+  for (const name of OBJ_MODELS) {
+    defs.push({ name, type: "obj", path: `/map_pieces/${name}.obj` });
+  }
+  for (const name of GLB_MODELS) {
+    defs.push({ name, type: "glb", path: `/${name}.glb` });
+  }
+  return defs;
+}
+
+const MODEL_DEFS = buildModelDefs();
+
+/** Model name prefixes that use the ishigaki stone texture */
+const ISHIGAKI_PREFIXES = ["wall_", "water_"];
+
+function useIshigaki(name: string): boolean {
+  return ISHIGAKI_PREFIXES.some((p) => name.startsWith(p));
+}
 
 export class ModelCatalog {
   private cache = new Map<string, THREE.Group>();
   private loadingPromises = new Map<string, Promise<THREE.Group>>();
-  private material: THREE.MeshStandardMaterial | null = null;
-  private materialPromise: Promise<THREE.MeshStandardMaterial> | null = null;
-  private loader = new OBJLoader();
+  private fallbackMaterial: THREE.MeshStandardMaterial | null = null;
+  private fallbackPromise: Promise<THREE.MeshStandardMaterial> | null = null;
+  private ishigakiMaterial: THREE.MeshStandardMaterial | null = null;
+  private ishigakiPromise: Promise<THREE.MeshStandardMaterial> | null = null;
 
   // Offscreen preview renderer
   private previewRenderer: THREE.WebGLRenderer | null = null;
   private previewScene = new THREE.Scene();
-  private previewCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  private previewCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
 
   constructor() {
     this.previewScene.background = new THREE.Color(0x1a1a2e);
@@ -25,32 +79,65 @@ export class ModelCatalog {
   }
 
   getModelNames(): string[] {
-    const names: string[] = [];
-    for (let i = 0; i < MODEL_COUNT; i++) names.push(`model_${i}`);
-    return names;
+    return MODEL_DEFS.map((d) => d.name);
   }
 
-  private async loadMaterial(): Promise<THREE.MeshStandardMaterial> {
-    if (this.material) return this.material;
-    if (this.materialPromise) return this.materialPromise;
+  private getDef(name: string): ModelDef | undefined {
+    return MODEL_DEFS.find((d) => d.name === name);
+  }
 
-    this.materialPromise = new Promise((resolve) => {
+  private async loadFallbackMaterial(): Promise<THREE.MeshStandardMaterial> {
+    if (this.fallbackMaterial) return this.fallbackMaterial;
+    if (this.fallbackPromise) return this.fallbackPromise;
+
+    this.fallbackPromise = new Promise((resolve) => {
       const texLoader = new THREE.TextureLoader();
-      const colorMap = texLoader.load(`${TEXTURE_BASE}tenshu_gate_color.png`);
-      const normalMap = texLoader.load(`${TEXTURE_BASE}tenshu_gate_normal.png`);
-      const roughnessMap = texLoader.load(`${TEXTURE_BASE}tenshu_gate_roughness.png`);
+      const colorMap = texLoader.load("/buildings/tenshu_gate_color.png");
+      const normalMap = texLoader.load("/buildings/tenshu_gate_normal.png");
+      const roughnessMap = texLoader.load(
+        "/buildings/tenshu_gate_roughness.png",
+      );
 
       colorMap.colorSpace = THREE.SRGBColorSpace;
 
-      this.material = new THREE.MeshStandardMaterial({
+      this.fallbackMaterial = new THREE.MeshStandardMaterial({
         map: colorMap,
         normalMap,
         roughnessMap,
       });
-      resolve(this.material);
+      resolve(this.fallbackMaterial);
     });
 
-    return this.materialPromise;
+    return this.fallbackPromise;
+  }
+
+  private async loadIshigakiMaterial(): Promise<THREE.MeshStandardMaterial> {
+    if (this.ishigakiMaterial) return this.ishigakiMaterial;
+    if (this.ishigakiPromise) return this.ishigakiPromise;
+
+    this.ishigakiPromise = new Promise((resolve) => {
+      const texLoader = new THREE.TextureLoader();
+      const colorMap = texLoader.load(
+        "/buildings/ishigaki_moat_ground_color.png",
+      );
+      const normalMap = texLoader.load(
+        "/buildings/ishigaki_moat_ground_normal.png",
+      );
+      const roughnessMap = texLoader.load(
+        "/buildings/ishigaki_moat_ground_roughness.png",
+      );
+
+      colorMap.colorSpace = THREE.SRGBColorSpace;
+
+      this.ishigakiMaterial = new THREE.MeshStandardMaterial({
+        map: colorMap,
+        normalMap,
+        roughnessMap,
+      });
+      resolve(this.ishigakiMaterial);
+    });
+
+    return this.ishigakiPromise;
   }
 
   async loadModel(name: string): Promise<THREE.Group> {
@@ -63,24 +150,88 @@ export class ModelCatalog {
       return group.clone();
     }
 
-    const promise = (async () => {
-      const mat = await this.loadMaterial();
-      const url = `${TEXTURE_BASE}${name}.obj`;
-      const obj = await this.loader.loadAsync(url);
+    const def = this.getDef(name);
+    if (!def) throw new Error(`Unknown model: ${name}`);
 
+    const promise = def.type === "glb" ? this.loadGLB(def) : this.loadOBJ(def);
+
+    this.loadingPromises.set(name, promise);
+    const group = await promise;
+    return group.clone();
+  }
+
+  private async loadOBJ(def: ModelDef): Promise<THREE.Group> {
+    const mtlLoader = new MTLLoader();
+    mtlLoader.setPath("/map_pieces/");
+
+    let materials: MTLLoader.MaterialCreator | null = null;
+    try {
+      materials = await mtlLoader.loadAsync(`${def.name}.mtl`);
+      materials.preload();
+    } catch {
+      // MTL load failed, will use fallback
+    }
+
+    const objLoader = new OBJLoader();
+    if (materials) {
+      objLoader.setMaterials(materials);
+    }
+
+    const obj = await objLoader.loadAsync(def.path);
+
+    // Check if MTL provided real materials with textures
+    let hasRealMaterial = false;
+    if (materials) {
+      obj.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mat = (child as THREE.Mesh).material as THREE.Material;
+          if (mat && "map" in mat && (mat as THREE.MeshPhongMaterial).map) {
+            hasRealMaterial = true;
+          }
+        }
+      });
+    }
+
+    if (!hasRealMaterial) {
+      const mat = useIshigaki(def.name)
+        ? await this.loadIshigakiMaterial()
+        : await this.loadFallbackMaterial();
       obj.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           (child as THREE.Mesh).material = mat;
         }
       });
+    }
 
-      this.cache.set(name, obj);
-      return obj;
-    })();
+    return this.centerAndWrap(obj, def.name);
+  }
 
-    this.loadingPromises.set(name, promise);
-    const group = await promise;
-    return group.clone();
+  private async loadGLB(def: ModelDef): Promise<THREE.Group> {
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(def.path);
+    const root = gltf.scene;
+    return this.centerAndWrap(root, def.name);
+  }
+
+  /** Models whose OBJ origin is already the desired pivot (e.g. inner corner of an L-shape) */
+  private static readonly KEEP_XZ_PIVOT = new Set(['castle_wall_corner']);
+
+  private centerAndWrap(obj: THREE.Object3D, name: string): THREE.Group {
+    // Align min-corner (bottom-left) to local origin so the grid point = bottom-left edge.
+    // This lets pieces of different sizes align their edges at grid boundaries.
+    const box = new THREE.Box3().setFromObject(obj);
+    if (ModelCatalog.KEEP_XZ_PIVOT.has(name)) {
+      // Only ground-align Y; keep XZ pivot from the OBJ
+      obj.position.y = -box.min.y;
+    } else {
+      obj.position.set(-box.min.x, -box.min.y, -box.min.z);
+    }
+
+    const wrapper = new THREE.Group();
+    wrapper.add(obj);
+
+    this.cache.set(name, wrapper);
+    return wrapper;
   }
 
   async renderPreview(name: string): Promise<string> {
@@ -114,10 +265,12 @@ export class ModelCatalog {
       center.z + dist * 0.6,
     );
     this.previewCamera.lookAt(center);
+    this.previewCamera.far = dist * 4;
+    this.previewCamera.updateProjectionMatrix();
 
     this.previewRenderer.render(this.previewScene, this.previewCamera);
 
-    return this.previewRenderer.domElement.toDataURL('image/png');
+    return this.previewRenderer.domElement.toDataURL("image/png");
   }
 
   createGhost(original: THREE.Group): THREE.Group {
@@ -125,7 +278,8 @@ export class ModelCatalog {
     ghost.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
-        const mat = (mesh.material as THREE.MeshStandardMaterial).clone();
+        const srcMat = mesh.material as THREE.Material;
+        const mat = srcMat.clone() as THREE.MeshStandardMaterial;
         mat.transparent = true;
         mat.opacity = 0.5;
         mat.depthWrite = false;

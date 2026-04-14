@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { Room, Client } from "@colyseus/core";
 import { GameState } from "../state/GameState.js";
 import { PlayerState } from "../state/PlayerState.js";
@@ -8,8 +10,12 @@ import { LightingSystem } from "../systems/LightingSystem.js";
 import { VisionSystem } from "../systems/VisionSystem.js";
 import { WinConditionSystem } from "../systems/WinConditionSystem.js";
 import { GAME, STATS } from "../../shared/constants.js";
+import { parseLevelJSON } from "../../shared/levelData.js";
+import type { LampPosition } from "../systems/LightingSystem.js";
 import { ClientMsg, ServerMsg, PlayerRole, GamePhase, WeaponType } from "../../shared/types.js";
 import type { MovePayload, AttackPayload, UseAbilityPayload, SelectWeaponPayload } from "../../shared/messages.js";
+
+const LEVEL_SCALE = 3;
 
 export class SamuraiJamRoom extends Room<GameState> {
   maxClients = GAME.MAX_PLAYERS;
@@ -28,6 +34,7 @@ export class SamuraiJamRoom extends Room<GameState> {
   private shogunAssigned = false;
   private samuraiCount = 0;
   private lastMetadataPhase = "";
+  private spawnPositions: Record<string, { x: number; z: number }> = {};
 
   onCreate(_options: any): void {
     SamuraiJamRoom.roomCounter++;
@@ -35,8 +42,51 @@ export class SamuraiJamRoom extends Room<GameState> {
     this.setState(new GameState());
     this.setMetadata({ roomName: this.displayName, phase: GamePhase.LOBBY, playerCount: 0 });
 
-    this.physics = new PhysicsSystem();
-    this.lighting = new LightingSystem(this.state);
+    // Load level JSON from disk
+    const levelPath = resolve(process.cwd(), "public/map_pieces/level_1.json");
+    const levelJSON = readFileSync(levelPath, "utf-8");
+    const levelData = parseLevelJSON(levelJSON);
+
+    // Scale colliders to match game world (editor units * LEVEL_SCALE)
+    const colliders = levelData.colliders.map((c) => ({
+      minX: c.minX * LEVEL_SCALE,
+      minZ: c.minZ * LEVEL_SCALE,
+      maxX: c.maxX * LEVEL_SCALE,
+      maxZ: c.maxZ * LEVEL_SCALE,
+      height: (c.height ?? 3) * LEVEL_SCALE,
+    }));
+
+    // Scale ramps to match game world
+    const ramps = levelData.ramps.map((r) => ({
+      minX: r.minX * LEVEL_SCALE,
+      minZ: r.minZ * LEVEL_SCALE,
+      maxX: r.maxX * LEVEL_SCALE,
+      maxZ: r.maxZ * LEVEL_SCALE,
+      startHeight: r.startHeight * LEVEL_SCALE,
+      endHeight: r.endHeight * LEVEL_SCALE,
+      direction: r.direction,
+      ascending: r.ascending,
+      rotationY: r.rotationY,
+    }));
+
+    // Scale spawn positions from level data
+    for (const [role, pos] of Object.entries(levelData.spawns)) {
+      this.spawnPositions[role] = { x: pos.x * LEVEL_SCALE, z: pos.z * LEVEL_SCALE };
+    }
+
+    // Extract lamp positions from "lantern" placements
+    const lampPositions: LampPosition[] = levelData.placements
+      .filter((p) => p.modelName === "lantern")
+      .map((p, i) => ({
+        id: `lamp_${String(i + 1).padStart(2, "0")}`,
+        x: p.x * LEVEL_SCALE,
+        z: p.z * LEVEL_SCALE,
+      }));
+
+    const boundsWidth = levelData.gridWidth * (levelData.cellSize ?? 1) * LEVEL_SCALE;
+    const boundsDepth = levelData.gridDepth * (levelData.cellSize ?? 1) * LEVEL_SCALE;
+    this.physics = new PhysicsSystem(colliders, boundsWidth, boundsDepth, ramps);
+    this.lighting = new LightingSystem(this.state, lampPositions);
     this.combat = new CombatSystem(this.state, this.physics, this);
     this.ability = new AbilitySystem(this.state, this.physics, this.lighting, this);
     this.vision = new VisionSystem(this.state);
@@ -151,12 +201,19 @@ export class SamuraiJamRoom extends Room<GameState> {
   private assignRole(player: PlayerState, role: PlayerRole): void {
     player.role = role;
 
+    const defaultSpawns: Record<string, { x: number; z: number }> = {
+      ninja: { x: 40, z: 50 },
+      samurai: { x: 42, z: 50 },
+      shogun: { x: 38, z: 50 },
+    };
+    const spawn = this.spawnPositions[role] ?? defaultSpawns[role];
+
     switch (role) {
       case PlayerRole.NINJA:
         player.maxHp = STATS.ninja.maxHp;
         player.hp = STATS.ninja.maxHp;
         player.weapon = WeaponType.KATANA;
-        player.x = 40; player.z = 50; player.y = 0;
+        player.x = spawn.x; player.z = spawn.z; player.y = 0;
         player.waterBombsLeft = STATS.ninja.waterBombCount;
         player.smokeBombsLeft = STATS.ninja.smokeBombCount;
         player.hasGrapplingHook = true;
@@ -166,13 +223,13 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.hp = STATS.samurai.maxHp;
         player.weapon = WeaponType.KATANA;
         player.torchesLeft = STATS.samurai.torchCount;
-        player.x = 42; player.z = 50; player.y = 0;
+        player.x = spawn.x; player.z = spawn.z; player.y = 0;
         break;
       case PlayerRole.SHOGUN:
         player.maxHp = STATS.shogun.maxHp;
         player.hp = STATS.shogun.maxHp;
         player.weapon = WeaponType.KATANA;
-        player.x = 38; player.z = 50; player.y = 0;
+        player.x = spawn.x; player.z = spawn.z; player.y = 0;
         break;
     }
   }

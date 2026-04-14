@@ -1,68 +1,118 @@
 import * as THREE from 'three';
 
 export interface PlacedModel {
+  id: number;
   modelName: string;
-  col: number;
-  row: number;
+  x: number;
+  z: number;
   rotationX: number;
   rotationY: number;
   rotationZ: number;
   mesh: THREE.Object3D;
 }
 
+export interface CollisionBox {
+  id: number;
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  height: number;
+  mesh: THREE.Mesh;
+}
+
+export interface RampBox {
+  id: number;
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  startHeight: number;
+  endHeight: number;
+  direction: 'x' | 'z';
+  ascending: boolean;
+  rotationY: number;
+  mesh: THREE.Mesh;
+}
+
+export interface SpawnMarker {
+  role: string;
+  x: number;
+  z: number;
+  mesh: THREE.Mesh;
+}
+
+const SPAWN_COLORS: Record<string, number> = {
+  ninja: 0x9b59b6,
+  samurai: 0x3498db,
+  shogun: 0xf1c40f,
+};
+
 export class GridSystem {
   cellSize: number;
   width: number;
   depth: number;
-  private placements = new Map<string, PlacedModel>();
+  private placements = new Map<number, PlacedModel>();
+  private nextId = 1;
   private gridHelper: THREE.GridHelper | null = null;
   private groundPlane: THREE.Mesh | null = null;
 
-  constructor(cellSize = 2, width = 40, depth = 40) {
+  private colliders = new Map<number, CollisionBox>();
+  private nextColliderId = 1;
+
+  private ramps = new Map<number, RampBox>();
+  private nextRampId = 1;
+
+  private spawns = new Map<string, SpawnMarker>();
+
+  constructor(cellSize = 1, width = 80, depth = 80) {
     this.cellSize = cellSize;
     this.width = width;
     this.depth = depth;
   }
 
-  private static key(col: number, row: number): string {
-    return `${col}_${row}`;
-  }
-
-  worldToGrid(x: number, z: number): { col: number; row: number } {
-    const col = Math.floor(x / this.cellSize);
-    const row = Math.floor(z / this.cellSize);
-    return { col, row };
-  }
-
-  gridToWorld(col: number, row: number): { x: number; z: number } {
+  /** Snap a world coordinate to the nearest grid intersection */
+  snapToGrid(x: number, z: number): { x: number; z: number } {
     return {
-      x: col * this.cellSize + this.cellSize / 2,
-      z: row * this.cellSize + this.cellSize / 2,
+      x: Math.round(x / this.cellSize) * this.cellSize,
+      z: Math.round(z / this.cellSize) * this.cellSize,
     };
   }
 
-  snapToGrid(x: number, z: number): { x: number; z: number } {
-    const { col, row } = this.worldToGrid(x, z);
-    return this.gridToWorld(col, row);
+  isInBounds(x: number, z: number): boolean {
+    const totalX = this.width * this.cellSize;
+    const totalZ = this.depth * this.cellSize;
+    return x >= 0 && x <= totalX && z >= 0 && z <= totalZ;
   }
 
-  isInBounds(col: number, row: number): boolean {
-    return col >= 0 && col < this.width && row >= 0 && row < this.depth;
+  place(model: Omit<PlacedModel, 'id'>): PlacedModel {
+    const id = this.nextId++;
+    const placed: PlacedModel = { id, ...model };
+    this.placements.set(id, placed);
+    return placed;
   }
 
-  getPlacement(col: number, row: number): PlacedModel | undefined {
-    return this.placements.get(GridSystem.key(col, row));
-  }
-
-  place(model: PlacedModel): void {
-    this.placements.set(GridSystem.key(model.col, model.row), model);
-  }
-
-  remove(col: number, row: number): PlacedModel | undefined {
-    const key = GridSystem.key(col, row);
-    const model = this.placements.get(key);
-    if (model) this.placements.delete(key);
+  removeById(id: number): PlacedModel | undefined {
+    const model = this.placements.get(id);
+    if (model) this.placements.delete(id);
     return model;
+  }
+
+  /** Find placement whose mesh (or ancestor) matches the given object */
+  findByMesh(object: THREE.Object3D): PlacedModel | undefined {
+    for (const p of this.placements.values()) {
+      if (this.isDescendant(object, p.mesh)) return p;
+    }
+    return undefined;
+  }
+
+  private isDescendant(child: THREE.Object3D, ancestor: THREE.Object3D): boolean {
+    let current: THREE.Object3D | null = child;
+    while (current) {
+      if (current === ancestor) return true;
+      current = current.parent;
+    }
+    return false;
   }
 
   clearAll(): PlacedModel[] {
@@ -78,6 +128,228 @@ export class GridSystem {
   get placementCount(): number {
     return this.placements.size;
   }
+
+  /** Get all placed meshes for raycasting */
+  getPlacedMeshes(): THREE.Object3D[] {
+    return this.getAllPlacements().map((p) => p.mesh);
+  }
+
+  /** Return the max height of placed models overlapping a 2D area, or null if none found */
+  getHeightOfModelsInArea(minX: number, minZ: number, maxX: number, maxZ: number): number | null {
+    let maxHeight: number | null = null;
+    for (const p of this.placements.values()) {
+      const box = new THREE.Box3().setFromObject(p.mesh);
+      // Check 2D overlap (XZ)
+      if (box.max.x > minX && box.min.x < maxX && box.max.z > minZ && box.min.z < maxZ) {
+        const h = box.max.y - box.min.y;
+        if (maxHeight === null || h > maxHeight) maxHeight = h;
+      }
+    }
+    return maxHeight;
+  }
+
+  // ── Collider methods ──────────────────────────────────────────────────
+
+  addCollider(minX: number, minZ: number, maxX: number, maxZ: number, height = 3): CollisionBox {
+    const id = this.nextColliderId++;
+    const w = maxX - minX;
+    const d = maxZ - minZ;
+
+    const geo = new THREE.BoxGeometry(w, height, d);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(minX + w / 2, height / 2, minZ + d / 2);
+    mesh.name = '__collider__';
+
+    const box: CollisionBox = { id, minX, minZ, maxX, maxZ, height, mesh };
+    this.colliders.set(id, box);
+    return box;
+  }
+
+  removeColliderById(id: number): CollisionBox | undefined {
+    const box = this.colliders.get(id);
+    if (box) this.colliders.delete(id);
+    return box;
+  }
+
+  findColliderByMesh(object: THREE.Object3D): CollisionBox | undefined {
+    let current: THREE.Object3D | null = object;
+    while (current) {
+      for (const c of this.colliders.values()) {
+        if (c.mesh === current) return c;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  getAllColliders(): CollisionBox[] {
+    return Array.from(this.colliders.values());
+  }
+
+  getColliderMeshes(): THREE.Object3D[] {
+    return this.getAllColliders().map((c) => c.mesh);
+  }
+
+  clearColliders(): CollisionBox[] {
+    const all = Array.from(this.colliders.values());
+    this.colliders.clear();
+    return all;
+  }
+
+  get colliderCount(): number {
+    return this.colliders.size;
+  }
+
+  // ── Ramp methods ────────────────────────────────────────────────────────
+
+  addRamp(
+    minX: number, minZ: number, maxX: number, maxZ: number,
+    startHeight: number, endHeight: number,
+    direction: 'x' | 'z', ascending: boolean,
+    rotationY = 0,
+  ): RampBox {
+    const id = this.nextRampId++;
+    const w = maxX - minX;
+    const d = maxZ - minZ;
+    const hLow = Math.min(startHeight, endHeight);
+    const hHigh = Math.max(startHeight, endHeight);
+    const hMid = (hLow + hHigh) / 2;
+
+    // Create an inclined plane using a BoxGeometry with minimal thickness
+    const thickness = 0.15;
+    const length = direction === 'x' ? w : d;
+    const breadth = direction === 'x' ? d : w;
+    const geo = new THREE.BoxGeometry(
+      direction === 'x' ? length : breadth,
+      thickness,
+      direction === 'x' ? breadth : length,
+    );
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(minX + w / 2, hMid, minZ + d / 2);
+
+    // Tilt the mesh to visualize the slope
+    mesh.rotation.order = 'YXZ';
+    mesh.rotation.y = rotationY;
+    const angle = Math.atan2(hHigh - hLow, length);
+    const sign = ascending ? 1 : -1;
+    if (direction === 'z') {
+      mesh.rotation.x = -sign * angle;
+    } else {
+      mesh.rotation.z = sign * angle;
+    }
+    mesh.name = '__ramp__';
+
+    const ramp: RampBox = { id, minX, minZ, maxX, maxZ, startHeight, endHeight, direction, ascending, rotationY, mesh };
+    this.ramps.set(id, ramp);
+    return ramp;
+  }
+
+  removeRampById(id: number): RampBox | undefined {
+    const ramp = this.ramps.get(id);
+    if (ramp) this.ramps.delete(id);
+    return ramp;
+  }
+
+  findRampByMesh(object: THREE.Object3D): RampBox | undefined {
+    let current: THREE.Object3D | null = object;
+    while (current) {
+      for (const r of this.ramps.values()) {
+        if (r.mesh === current) return r;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  getAllRamps(): RampBox[] {
+    return Array.from(this.ramps.values());
+  }
+
+  getRampMeshes(): THREE.Object3D[] {
+    return this.getAllRamps().map((r) => r.mesh);
+  }
+
+  clearRamps(): RampBox[] {
+    const all = Array.from(this.ramps.values());
+    this.ramps.clear();
+    return all;
+  }
+
+  get rampCount(): number {
+    return this.ramps.size;
+  }
+
+  // ── Spawn methods ───────────────────────────────────────────────────────
+
+  setSpawn(role: string, x: number, z: number): SpawnMarker {
+    const existing = this.spawns.get(role);
+    if (existing) {
+      existing.mesh.parent?.remove(existing.mesh);
+    }
+
+    const color = SPAWN_COLORS[role] ?? 0xffffff;
+    const geo = new THREE.CylinderGeometry(0.4, 0.4, 2, 12);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 1, z);
+    mesh.name = '__spawn__';
+
+    const marker: SpawnMarker = { role, x, z, mesh };
+    this.spawns.set(role, marker);
+    return marker;
+  }
+
+  removeSpawn(role: string): SpawnMarker | undefined {
+    const marker = this.spawns.get(role);
+    if (marker) {
+      marker.mesh.parent?.remove(marker.mesh);
+      this.spawns.delete(role);
+    }
+    return marker;
+  }
+
+  getSpawn(role: string): SpawnMarker | undefined {
+    return this.spawns.get(role);
+  }
+
+  getAllSpawns(): Record<string, { x: number; z: number }> {
+    const result: Record<string, { x: number; z: number }> = {};
+    for (const [role, marker] of this.spawns) {
+      result[role] = { x: marker.x, z: marker.z };
+    }
+    return result;
+  }
+
+  clearSpawns(): SpawnMarker[] {
+    const all = Array.from(this.spawns.values());
+    this.spawns.clear();
+    return all;
+  }
+
+  getSpawnMeshes(): THREE.Object3D[] {
+    return Array.from(this.spawns.values()).map((s) => s.mesh);
+  }
+
+  findSpawnByMesh(object: THREE.Object3D): SpawnMarker | undefined {
+    for (const marker of this.spawns.values()) {
+      if (marker.mesh === object) return marker;
+    }
+    return undefined;
+  }
+
+  // ── Visuals ───────────────────────────────────────────────────────────
 
   createVisuals(scene: THREE.Scene): void {
     this.removeVisuals(scene);

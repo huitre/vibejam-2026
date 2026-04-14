@@ -1,15 +1,25 @@
 import { GameState } from "../state/GameState.js";
 import { LampState } from "../state/LampState.js";
-import { LAMP_POSITIONS, LAMP } from "../../shared/constants.js";
+import { LAMP } from "../../shared/constants.js";
+
+export interface LampPosition {
+  id: string;
+  x: number;
+  z: number;
+}
 
 export class LightingSystem {
-  constructor(private state: GameState) {}
+  private lampPositions: LampPosition[];
+
+  constructor(private state: GameState, lampPositions: LampPosition[]) {
+    this.lampPositions = lampPositions;
+  }
 
   // DEV: lamps that start unlit for testing relight
   private static DEV_UNLIT = new Set(["lamp_28", "lamp_29", "lamp_30"]);
 
   initializeLamps(): void {
-    for (const pos of LAMP_POSITIONS) {
+    for (const pos of this.lampPositions) {
       const lamp = new LampState();
       lamp.id = pos.id;
       lamp.x = pos.x;

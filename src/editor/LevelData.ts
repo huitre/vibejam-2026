@@ -1,10 +1,35 @@
 export interface PlacementEntry {
   modelName: string;
-  col: number;
-  row: number;
+  x: number;
+  z: number;
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+}
+
+export interface ColliderEntry {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  height: number;
+}
+
+export interface RampEntry {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  startHeight: number;
+  endHeight: number;
+  direction: 'x' | 'z';
+  ascending: boolean;
+  rotationY: number;
+}
+
+export interface SpawnEntry {
+  x: number;
+  z: number;
 }
 
 export interface LevelExport {
@@ -12,6 +37,9 @@ export interface LevelExport {
   gridDepth: number;
   cellSize: number;
   placements: PlacementEntry[];
+  colliders: ColliderEntry[];
+  ramps: RampEntry[];
+  spawns: Record<string, SpawnEntry>;
 }
 
 export function exportToJSON(
@@ -19,8 +47,11 @@ export function exportToJSON(
   gridDepth: number,
   cellSize: number,
   placements: PlacementEntry[],
+  colliders: ColliderEntry[],
+  spawns: Record<string, SpawnEntry> = {},
+  ramps: RampEntry[] = [],
 ): string {
-  const data: LevelExport = { gridWidth, gridDepth, cellSize, placements };
+  const data: LevelExport = { gridWidth, gridDepth, cellSize, placements, colliders, ramps, spawns };
   return JSON.stringify(data, null, 2);
 }
 
@@ -33,7 +64,10 @@ export function importFromJSON(json: string): LevelExport {
   ) {
     throw new Error('Invalid level JSON format');
   }
-  data.cellSize = data.cellSize ?? 2;
+  data.cellSize = data.cellSize ?? 1;
+  data.colliders = data.colliders ?? [];
+  data.ramps = data.ramps ?? [];
+  data.spawns = data.spawns ?? {};
   return data;
 }
 

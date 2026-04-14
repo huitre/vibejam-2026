@@ -1,4 +1,5 @@
-import { WALL_COLLIDERS, STATS, MAP } from "../../shared/constants.js";
+import { STATS } from "../../shared/constants.js";
+import type { LevelCollider, LevelRamp } from "../../shared/levelData.js";
 import { PlayerState } from "../state/PlayerState.js";
 import { GameState } from "../state/GameState.js";
 import { PlayerRole } from "../../shared/types.js";
@@ -7,6 +8,17 @@ const PLAYER_RADIUS = 0.4;
 
 export class PhysicsSystem {
   private noclipPlayers = new Set<string>();
+  private colliders: LevelCollider[];
+  private ramps: LevelRamp[];
+  private boundsWidth: number;
+  private boundsDepth: number;
+
+  constructor(colliders: LevelCollider[], boundsWidth: number, boundsDepth: number, ramps: LevelRamp[] = []) {
+    this.colliders = colliders;
+    this.ramps = ramps;
+    this.boundsWidth = boundsWidth;
+    this.boundsDepth = boundsDepth;
+  }
 
   toggleNoclip(sessionId: string): void {
     if (this.noclipPlayers.has(sessionId)) {
@@ -36,23 +48,60 @@ export class PhysicsSystem {
 
     // Check collision (skip for noclip players)
     if (this.noclipPlayers.has(player.sessionId) || !this.collidesWithWall(newX, newZ)) {
-      player.x = Math.max(PLAYER_RADIUS, Math.min(MAP.WIDTH - PLAYER_RADIUS, newX));
-      player.z = Math.max(PLAYER_RADIUS, Math.min(MAP.DEPTH - PLAYER_RADIUS, newZ));
+      player.x = Math.max(PLAYER_RADIUS, Math.min(this.boundsWidth - PLAYER_RADIUS, newX));
+      player.z = Math.max(PLAYER_RADIUS, Math.min(this.boundsDepth - PLAYER_RADIUS, newZ));
     } else {
       // Try sliding along axes
       if (!this.collidesWithWall(newX, player.z)) {
-        player.x = Math.max(PLAYER_RADIUS, Math.min(MAP.WIDTH - PLAYER_RADIUS, newX));
+        player.x = Math.max(PLAYER_RADIUS, Math.min(this.boundsWidth - PLAYER_RADIUS, newX));
       }
       if (!this.collidesWithWall(player.x, newZ)) {
-        player.z = Math.max(PLAYER_RADIUS, Math.min(MAP.DEPTH - PLAYER_RADIUS, newZ));
+        player.z = Math.max(PLAYER_RADIUS, Math.min(this.boundsDepth - PLAYER_RADIUS, newZ));
       }
     }
 
+    player.y = this.getHeightAtPosition(player.x, player.z);
     player.rotationY = rotationY;
   }
 
+  getHeightAtPosition(x: number, z: number): number {
+    let maxHeight = 0;
+    for (const ramp of this.ramps) {
+      // Transform position into ramp local space (inverse rotationY around ramp center)
+      const cx = (ramp.minX + ramp.maxX) / 2;
+      const cz = (ramp.minZ + ramp.maxZ) / 2;
+      const rotY = ramp.rotationY ?? 0;
+      let testX: number, testZ: number;
+      if (rotY === 0) {
+        testX = x;
+        testZ = z;
+      } else {
+        const dx = x - cx;
+        const dz = z - cz;
+        const cos = Math.cos(-rotY);
+        const sin = Math.sin(-rotY);
+        testX = dx * cos - dz * sin + cx;
+        testZ = dx * sin + dz * cos + cz;
+      }
+
+      if (testX < ramp.minX || testX > ramp.maxX || testZ < ramp.minZ || testZ > ramp.maxZ) continue;
+
+      let t: number;
+      if (ramp.direction === 'x') {
+        t = (ramp.maxX - ramp.minX) > 0 ? (testX - ramp.minX) / (ramp.maxX - ramp.minX) : 0;
+      } else {
+        t = (ramp.maxZ - ramp.minZ) > 0 ? (testZ - ramp.minZ) / (ramp.maxZ - ramp.minZ) : 0;
+      }
+      if (!ramp.ascending) t = 1 - t;
+
+      const height = ramp.startHeight + t * (ramp.endHeight - ramp.startHeight);
+      if (height > maxHeight) maxHeight = height;
+    }
+    return maxHeight;
+  }
+
   collidesWithWall(x: number, z: number): boolean {
-    for (const wall of WALL_COLLIDERS) {
+    for (const wall of this.colliders) {
       if (
         x + PLAYER_RADIUS > wall.minX &&
         x - PLAYER_RADIUS < wall.maxX &&
@@ -66,7 +115,7 @@ export class PhysicsSystem {
   }
 
   isNearWall(x: number, z: number, maxDist: number): boolean {
-    for (const wall of WALL_COLLIDERS) {
+    for (const wall of this.colliders) {
       const closestX = Math.max(wall.minX, Math.min(x, wall.maxX));
       const closestZ = Math.max(wall.minZ, Math.min(z, wall.maxZ));
       const distSq = (x - closestX) ** 2 + (z - closestZ) ** 2;
@@ -75,11 +124,12 @@ export class PhysicsSystem {
     return false;
   }
 
-  getNearestWallPoint(x: number, z: number): { wx: number; wz: number } | null {
+  getNearestWallPoint(x: number, z: number): { wx: number; wz: number; height: number } | null {
     let bestDistSq = Infinity;
     let bestX = x;
     let bestZ = z;
-    for (const wall of WALL_COLLIDERS) {
+    let bestHeight = 6;
+    for (const wall of this.colliders) {
       const cx = Math.max(wall.minX, Math.min(x, wall.maxX));
       const cz = Math.max(wall.minZ, Math.min(z, wall.maxZ));
       const dSq = (x - cx) ** 2 + (z - cz) ** 2;
@@ -87,10 +137,11 @@ export class PhysicsSystem {
         bestDistSq = dSq;
         bestX = cx;
         bestZ = cz;
+        bestHeight = wall.height ?? 6;
       }
     }
     if (bestDistSq === Infinity) return null;
-    return { wx: bestX, wz: bestZ };
+    return { wx: bestX, wz: bestZ, height: bestHeight };
   }
 
   getPlayersInRadius(state: GameState, x: number, z: number, radius: number): PlayerState[] {

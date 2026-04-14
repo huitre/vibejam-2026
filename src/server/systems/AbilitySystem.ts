@@ -115,8 +115,8 @@ export class AbilitySystem {
     player.isClimbing = true;
     player.hasGrapplingHook = false;
 
-    const climbHeight = 6; // wall height
     const wallPt = this.physics.getNearestWallPoint(player.x, player.z);
+    const climbHeight = wallPt ? wallPt.height : 6;
     const wallX = wallPt ? wallPt.wx : player.x;
     const wallZ = wallPt ? wallPt.wz : player.z;
 
@@ -143,11 +143,20 @@ export class AbilitySystem {
         clearInterval(interval);
         player.isClimbing = false;
         player.y = 0;
-        // Move player slightly past the wall
+        // Move player past the wall until outside any collider
         const dirX = Math.sin(player.rotationY);
         const dirZ = Math.cos(player.rotationY);
-        player.x += dirX * 2;
-        player.z += dirZ * 2;
+        const stepSize = 0.5;
+        const maxSteps = 40;
+        for (let i = 1; i <= maxSteps; i++) {
+          const testX = player.x + dirX * stepSize * i;
+          const testZ = player.z + dirZ * stepSize * i;
+          if (!this.physics.collidesWithWall(testX, testZ)) {
+            player.x = testX;
+            player.z = testZ;
+            break;
+          }
+        }
       }
     }, stepDuration);
   }

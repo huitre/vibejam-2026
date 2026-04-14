@@ -1,5 +1,3 @@
-import { LAMP_POSITIONS, LAMP } from "../../shared/constants.js";
-
 export interface LampPlacement {
   id: string;
   x: number;
@@ -7,9 +5,7 @@ export interface LampPlacement {
   z: number;
 }
 
+/** Lamp positions are now driven by the server state (synced via onLampAdded). */
 export function getLampPositions(): LampPlacement[] {
-  return LAMP_POSITIONS.map((p) => ({
-    ...p,
-    y: LAMP.DEFAULT_HEIGHT,
-  }));
+  return [];
 }

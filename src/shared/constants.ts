@@ -18,7 +18,7 @@ export const GAME = {
   SHOGUN_COUNT: 1,
   MATCH_DURATION_SEC: 300,
   TICK_RATE_MS: 50,
-  DEV_MIN_PLAYERS: 3,
+  DEV_MIN_PLAYERS: 1,
 };
 
 // Player stats by role
@@ -37,7 +37,7 @@ export const STATS = {
     waterBombBlastRadius: 3,
     bombMaxThrowDist: 12,
     maxStamina: 100,
-    sprintMultiplier: 1.5,
+    sprintMultiplier: 3,
     staminaDrain: 25,
     staminaRegen: 20,
     staminaRegenDelay: 600,
@@ -58,7 +58,7 @@ export const STATS = {
     torchRange: 12,
     torchCount: 3,
     maxStamina: 100,
-    sprintMultiplier: 1.4,
+    sprintMultiplier: 2.8,
     staminaDrain: 20,
     staminaRegen: 18,
     staminaRegenDelay: 600,
@@ -74,7 +74,7 @@ export const STATS = {
     chargeCooldownMs: 8000,
     chargeWidth: 2,
     maxStamina: 100,
-    sprintMultiplier: 1.3,
+    sprintMultiplier: 2.6,
     staminaDrain: 18,
     staminaRegen: 15,
     staminaRegenDelay: 600,

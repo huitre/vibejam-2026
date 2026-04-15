@@ -34,7 +34,7 @@ export class AbilitySystem {
     private room: Room,
   ) {}
 
-  handleAbility(client: Client, player: PlayerState, data: { ability: string; targetX?: number; targetZ?: number }): void {
+  handleAbility(client: Client | null, player: PlayerState, data: { ability: string; targetX?: number; targetZ?: number }): void {
     const now = Date.now();
 
     switch (data.ability) {
@@ -400,6 +400,10 @@ export class AbilitySystem {
 
     this.state.players.forEach((player) => {
       if (!player.alive) return;
+      if (player.role === PlayerRole.NINJA) {
+        player.slowFactor = 1;
+        return;
+      }
       let slowed = false;
       for (const zone of this.caltropZones) {
         const dx = player.x - zone.x;

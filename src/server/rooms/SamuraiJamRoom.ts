@@ -9,6 +9,7 @@ import { AbilitySystem } from "../systems/AbilitySystem.js";
 import { LightingSystem } from "../systems/LightingSystem.js";
 import { VisionSystem } from "../systems/VisionSystem.js";
 import { WinConditionSystem } from "../systems/WinConditionSystem.js";
+import { BotSystem } from "../systems/BotSystem.js";
 import { GAME, STATS } from "../../shared/constants.js";
 import { parseLevelJSON } from "../../shared/levelData.js";
 import type { LampPosition } from "../systems/LightingSystem.js";
@@ -29,6 +30,7 @@ export class SamuraiJamRoom extends Room<GameState> {
   private lighting!: LightingSystem;
   private vision!: VisionSystem;
   private winCondition!: WinConditionSystem;
+  private botSystem!: BotSystem;
 
   private ninjaAssigned = false;
   private shogunAssigned = false;
@@ -91,6 +93,7 @@ export class SamuraiJamRoom extends Room<GameState> {
     this.ability = new AbilitySystem(this.state, this.physics, this.lighting, this);
     this.vision = new VisionSystem(this.state);
     this.winCondition = new WinConditionSystem(this.state, this);
+    this.botSystem = new BotSystem(this.state, this.physics, this.combat, this.ability, this.lighting, this.vision);
 
     this.lighting.initializeLamps();
 
@@ -196,6 +199,7 @@ export class SamuraiJamRoom extends Room<GameState> {
       (this.state.matchStartTime + GAME.MATCH_DURATION_SEC * 1000 - now) / 1000
     );
 
+    this.botSystem.update(deltaTime);
     this.ability.updateProjectiles(deltaTime);
     this.ability.updateChanneling(now);
     this.ability.updateStealth();
@@ -247,13 +251,45 @@ export class SamuraiJamRoom extends Room<GameState> {
   }
 
   private checkStartConditions(): void {
-    console.log(`[Room] checkStart: players=${this.state.players.size}, needed=${GAME.DEV_MIN_PLAYERS}, phase=${this.state.phase}`);
-    if (this.state.players.size >= GAME.DEV_MIN_PLAYERS && this.state.phase === GamePhase.LOBBY) {
+    // Count only human players (non-bot)
+    let humanCount = 0;
+    this.state.players.forEach((p) => {
+      if (!p.sessionId.startsWith("bot_")) humanCount++;
+    });
+
+    console.log(`[Room] checkStart: humans=${humanCount}, needed=${GAME.DEV_MIN_PLAYERS}, phase=${this.state.phase}`);
+    if (humanCount >= GAME.DEV_MIN_PLAYERS && this.state.phase === GamePhase.LOBBY) {
+      this.spawnBots();
       console.log("[Room] >>> GAME STARTING!");
       this.state.phase = GamePhase.PLAYING;
       this.state.matchStartTime = Date.now();
       this.state.matchTimeRemaining = GAME.MATCH_DURATION_SEC;
       this.broadcast(ServerMsg.GAME_START, { time: GAME.MATCH_DURATION_SEC });
+    }
+  }
+
+  private spawnBots(): void {
+    // Spawn shogun bot if no human shogun
+    if (!this.shogunAssigned) {
+      const bot = new PlayerState();
+      bot.sessionId = "bot_shogun";
+      this.assignRole(bot, PlayerRole.SHOGUN);
+      this.state.players.set(bot.sessionId, bot);
+      this.botSystem.spawnBot(bot);
+      this.shogunAssigned = true;
+      console.log(`[Room] Bot spawned: ${bot.sessionId} as ${bot.role}`);
+    }
+
+    // Spawn samurai bots for unfilled slots
+    let botIdx = 0;
+    while (this.samuraiCount < GAME.SAMURAI_COUNT) {
+      const bot = new PlayerState();
+      bot.sessionId = `bot_samurai_${++botIdx}`;
+      this.assignRole(bot, PlayerRole.SAMURAI);
+      this.state.players.set(bot.sessionId, bot);
+      this.botSystem.spawnBot(bot);
+      this.samuraiCount++;
+      console.log(`[Room] Bot spawned: ${bot.sessionId} as ${bot.role}`);
     }
   }
 }

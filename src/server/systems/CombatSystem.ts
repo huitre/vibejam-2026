@@ -12,7 +12,7 @@ export class CombatSystem {
     private room: Room,
   ) {}
 
-  handleAttack(client: Client, player: PlayerState): void {
+  handleAttack(client: Client | null, player: PlayerState): void {
     const now = Date.now();
     const stats = STATS[player.role as keyof typeof STATS];
     const cooldown = ('attackCooldownMs' in stats) ? stats.attackCooldownMs : 800;
@@ -27,7 +27,7 @@ export class CombatSystem {
     // Broadcast attack visual to all clients (except attacker who shows it locally)
     this.room.broadcast(ServerMsg.ATTACK_RESULT, {
       attackerSessionId: player.sessionId,
-    }, { except: client });
+    }, client ? { except: client } : undefined);
 
     // Determine weapon stats
     let damage: number;

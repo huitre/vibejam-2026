@@ -13,7 +13,18 @@ export class SceneManager {
 
   initialize(): void {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000);
+
+    const cubeLoader = new THREE.CubeTextureLoader();
+    cubeLoader.setPath("skybox-cubemap/");
+    const skybox = cubeLoader.load([
+      "skybox-rift-599-px.png",
+      "skybox-rift-599-nx.png",
+      "skybox-rift-599-py.png",
+      "skybox-rift-599-ny.png",
+      "skybox-rift-599-pz.png",
+      "skybox-rift-599-nz.png",
+    ]);
+    this.scene.background = skybox;
 
     const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });

@@ -21,6 +21,7 @@ interface CaltropZone {
   z: number;
   radius: number;
   expiresAt: number;
+  hitPlayers: Set<string>;
 }
 
 export class AbilitySystem {
@@ -55,6 +56,12 @@ export class AbilitySystem {
         break;
       case AbilityType.CALTROPS:
         this.handleCaltrops(player, now);
+        break;
+      case AbilityType.SHADOW_DASH:
+        this.handleShadowDash(player, now);
+        break;
+      case AbilityType.KAWARIMI:
+        this.handleKawarimi(player, now);
         break;
     }
   }
@@ -223,6 +230,7 @@ export class AbilitySystem {
       z: player.z,
       radius,
       expiresAt: now + STATS.ninja.caltropsDurationMs,
+      hitPlayers: new Set(),
     });
 
     this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
@@ -232,6 +240,67 @@ export class AbilitySystem {
       z: player.z,
       radius,
       duration: STATS.ninja.caltropsDurationMs,
+    });
+  }
+
+  private handleShadowDash(player: PlayerState, now: number): void {
+    if (player.role !== PlayerRole.NINJA) return;
+    if (now < player.dashCooldownUntil) return;
+    if (player.stamina < STATS.ninja.dashStaminaCost) return;
+
+    const startX = player.x;
+    const startZ = player.z;
+    const dirX = Math.sin(player.rotationY);
+    const dirZ = Math.cos(player.rotationY);
+    const dashDist = STATS.ninja.dashDist;
+    const stepSize = 0.5;
+    const steps = Math.ceil(dashDist / stepSize);
+
+    // Step-by-step movement, stop at wall
+    let finalX = player.x;
+    let finalZ = player.z;
+    for (let i = 1; i <= steps; i++) {
+      const testX = startX + dirX * stepSize * i;
+      const testZ = startZ + dirZ * stepSize * i;
+      if (this.physics.collidesWithWall(testX, testZ)) break;
+      finalX = testX;
+      finalZ = testZ;
+    }
+
+    player.x = finalX;
+    player.z = finalZ;
+    player.isDashing = true;
+    player.invulnerableUntil = now + STATS.ninja.dashInvulnMs;
+    player.dashCooldownUntil = now + STATS.ninja.dashCooldownMs;
+    player.stamina = Math.max(0, player.stamina - STATS.ninja.dashStaminaCost);
+
+    setTimeout(() => {
+      player.isDashing = false;
+    }, STATS.ninja.dashInvulnMs);
+
+    this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+      ability: AbilityType.SHADOW_DASH,
+      casterSessionId: player.sessionId,
+      startX,
+      startZ,
+      endX: finalX,
+      endZ: finalZ,
+    });
+  }
+
+  private handleKawarimi(player: PlayerState, now: number): void {
+    if (player.role !== PlayerRole.NINJA) return;
+    if (now < player.kawariminCooldownUntil) return;
+
+    player.kawariminCheckpointX = player.x;
+    player.kawariminCheckpointZ = player.z;
+    player.hasKawariminCheckpoint = true;
+
+    this.room.broadcast(ServerMsg.ABILITY_EFFECT, {
+      ability: AbilityType.KAWARIMI,
+      casterSessionId: player.sessionId,
+      x: player.x,
+      z: player.z,
     });
   }
 
@@ -410,6 +479,26 @@ export class AbilitySystem {
         const dz = player.z - zone.z;
         if (dx * dx + dz * dz <= zone.radius * zone.radius) {
           slowed = true;
+          // Deal damage once per zone entry
+          if (!zone.hitPlayers.has(player.sessionId)) {
+            zone.hitPlayers.add(player.sessionId);
+            const damage = STATS.ninja.caltropsDamage;
+            player.hp = Math.max(0, player.hp - damage);
+            this.room.broadcast(ServerMsg.PLAYER_HIT, {
+              x: player.x,
+              y: player.y,
+              z: player.z,
+              backstab: false,
+            });
+            if (player.hp <= 0) {
+              player.alive = false;
+              player.deaths++;
+              this.room.broadcast(ServerMsg.PLAYER_KILLED, {
+                sessionId: player.sessionId,
+                killerSessionId: "",
+              });
+            }
+          }
           break;
         }
       }

@@ -1,9 +1,16 @@
 import { GameState } from "../state/GameState.js";
 import { PlayerRole, GamePhase, ServerMsg } from "../../shared/types.js";
+import { GAME } from "../../shared/constants.js";
 import type { Room } from "@colyseus/core";
 
+interface RoomWithReset extends Room {
+  resetRound(): void;
+}
+
 export class WinConditionSystem {
-  constructor(private state: GameState, private room: Room) {}
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private state: GameState, private room: RoomWithReset) {}
 
   check(now: number): void {
     if (this.state.phase !== GamePhase.PLAYING) return;
@@ -47,6 +54,24 @@ export class WinConditionSystem {
     this.state.phase = GamePhase.FINISHED;
     this.state.winnerSide = winner;
 
+    if (winner === "ninja") {
+      this.state.ninjaRoundsWon++;
+    } else {
+      this.state.defenderRoundsWon++;
+    }
+
     this.room.broadcast(ServerMsg.GAME_OVER, { winner, reason });
+
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      this.room.resetRound();
+    }, GAME.ROUND_RESTART_DELAY_MS);
+  }
+
+  dispose(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
   }
 }

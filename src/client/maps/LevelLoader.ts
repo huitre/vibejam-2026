@@ -12,6 +12,7 @@ interface PlacementEntry {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  scale?: number;
 }
 
 interface LevelExport {
@@ -68,9 +69,7 @@ export class LevelLoader {
       if (!template) continue;
 
       const clone = template.clone();
-      if (!GLB_MODELS.has(p.modelName)) {
-        clone.scale.setScalar(LEVEL_SCALE);
-      }
+      clone.scale.setScalar(LEVEL_SCALE * (p.scale ?? 1));
       clone.position.set(p.x * LEVEL_SCALE, 0, p.z * LEVEL_SCALE);
       clone.rotation.set(p.rotationX ?? 0, p.rotationY ?? 0, p.rotationZ ?? 0);
       clone.traverse((child) => {
@@ -98,16 +97,9 @@ export class LevelLoader {
     // Merge all sub-meshes into a single mesh to reduce draw calls
     const merged = this.mergeModel(raw);
 
-    // Models whose OBJ origin is already the desired pivot (e.g. inner corner)
-    const KEEP_XZ_PIVOT = new Set(['castle_wall_corner']);
-
     // Align min-corner to local origin (same as editor)
     const box = new THREE.Box3().setFromObject(merged);
-    if (KEEP_XZ_PIVOT.has(name)) {
-      merged.position.y = -box.min.y;
-    } else {
-      merged.position.set(-box.min.x, -box.min.y, -box.min.z);
-    }
+    merged.position.set(-box.min.x, -box.min.y, -box.min.z);
 
     const wrapper = new THREE.Group();
     wrapper.add(merged);

@@ -39,6 +39,14 @@ export class InputSender {
     this.room.send(ClientMsg.READY, {});
   }
 
+  sendSelectRole(role: string): void {
+    this.room.send(ClientMsg.SELECT_ROLE, { role });
+  }
+
+  sendBlock(blocking: boolean): void {
+    this.room.send(ClientMsg.BLOCK, { blocking });
+  }
+
   sendDebugNoclip(): void {
     this.room.send(ClientMsg.DEBUG_NOCLIP, {});
   }

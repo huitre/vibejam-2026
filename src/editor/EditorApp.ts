@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GridSystem } from './GridSystem';
+import { GridSystem, type PlacedModel } from './GridSystem';
 import { ModelCatalog } from './ModelCatalog';
 import { EditorUI } from './EditorUI';
 import { exportToJSON, importFromJSON, downloadJSON } from './LevelData';
@@ -31,6 +31,11 @@ export class EditorApp {
   private ghostRotationX = 0;
   private ghostRotationY = 0;
   private ghostRotationZ = 0;
+  private ghostScale = 1;
+
+  // Selection state
+  private selectedPlacement: PlacedModel | null = null;
+  private selectionBox: THREE.BoxHelper | null = null;
 
   // Collision mode state
   private collisionMode = false;
@@ -133,6 +138,8 @@ export class EditorApp {
       onToggleCollisionMode: () => this.toggleCollisionMode(),
       onToggleSpawnMode: () => this.toggleSpawnMode(),
       onToggleRampMode: () => this.toggleRampMode(),
+      onOffsetChange: (x, z) => this.onOffsetChange(x, z),
+      onScaleChange: (scale) => this.onScaleChange(scale),
     });
     this.updateInfo();
   }
@@ -166,8 +173,25 @@ export class EditorApp {
         if (e.key === '2') this.setSpawnRole('samurai');
         if (e.key === '3') this.setSpawnRole('shogun');
       }
+      // Scale shortcuts: +/= to increase, - to decrease
+      if (e.key === '+' || e.key === '=' || e.key === '-') {
+        const step = e.shiftKey ? 0.5 : 0.1;
+        const delta = (e.key === '-') ? -step : step;
+        if (this.selectedPlacement) {
+          const newScale = Math.max(0.1, parseFloat((this.selectedPlacement.scale + delta).toFixed(2)));
+          this.grid.updatePlacementScale(this.selectedPlacement.id, newScale);
+          if (this.selectionBox) this.selectionBox.update();
+          this.ui.updatePropertyScale(newScale);
+        } else if (this.activeModel) {
+          this.ghostScale = Math.max(0.1, parseFloat((this.ghostScale + delta).toFixed(2)));
+          this.applyGhostRotation();
+          this.updateInfo();
+        }
+      }
       if (e.key === 'Escape') {
-        if (this.rampMode) {
+        if (this.selectedPlacement) {
+          this.deselectPlacement();
+        } else if (this.rampMode) {
           this.cancelRampDraw();
         } else if (this.spawnMode) {
           this.toggleSpawnMode();
@@ -176,6 +200,23 @@ export class EditorApp {
         } else {
           this.deselect();
         }
+      }
+
+      // Arrow key nudging for selected placement
+      if (this.selectedPlacement && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 0.5 : 0.1;
+        let dx = 0, dz = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        if (e.key === 'ArrowRight') dx = step;
+        if (e.key === 'ArrowUp') dz = -step;
+        if (e.key === 'ArrowDown') dz = step;
+        const p = this.selectedPlacement;
+        const newX = parseFloat((p.x + dx).toFixed(4));
+        const newZ = parseFloat((p.z + dz).toFixed(4));
+        this.grid.updatePlacement(p.id, newX, newZ);
+        if (this.selectionBox) this.selectionBox.update();
+        this.ui.updatePropertyPosition(newX, newZ);
       }
     });
   }
@@ -187,6 +228,7 @@ export class EditorApp {
     this.ui.setCollisionModeActive(this.collisionMode);
 
     if (this.collisionMode) {
+      this.deselectPlacement();
       // Exit spawn mode if active
       if (this.spawnMode) {
         this.spawnMode = false;
@@ -256,6 +298,7 @@ export class EditorApp {
     this.ui.setRampModeActive(this.rampMode);
 
     if (this.rampMode) {
+      this.deselectPlacement();
       if (this.collisionMode) {
         this.collisionMode = false;
         this.ui.setCollisionModeActive(false);
@@ -330,6 +373,7 @@ export class EditorApp {
     this.ui.setSpawnModeActive(this.spawnMode);
 
     if (this.spawnMode) {
+      this.deselectPlacement();
       // Exit collision mode if active
       if (this.collisionMode) {
         this.collisionMode = false;
@@ -460,6 +504,7 @@ export class EditorApp {
   private applyGhostRotation(): void {
     if (!this.ghostMesh) return;
     this.ghostMesh.rotation.set(this.ghostRotationX, this.ghostRotationY, this.ghostRotationZ);
+    this.ghostMesh.scale.set(this.ghostScale, this.ghostScale, this.ghostScale);
   }
 
   private removeGhost(): void {
@@ -541,7 +586,17 @@ export class EditorApp {
       return;
     }
 
-    if (!this.activeModel) return;
+    if (!this.activeModel) {
+      // Selection mode: try to select a placed model
+      const hit = this.raycastPlacedModels();
+      if (hit) {
+        const placed = this.grid.findByMesh(hit);
+        if (placed) this.selectPlacement(placed);
+      } else {
+        this.deselectPlacement();
+      }
+      return;
+    }
 
     const point = this.raycastGround();
     if (!point) return;
@@ -552,6 +607,8 @@ export class EditorApp {
     await this.placeModel(
       this.activeModel, snapped.x, snapped.z,
       this.ghostRotationX, this.ghostRotationY, this.ghostRotationZ,
+      this.ghostScale,
+      true,
     );
   }
 
@@ -563,11 +620,8 @@ export class EditorApp {
       const meshes = this.grid.getSpawnMeshes();
       const hits = this.raycaster.intersectObjects(meshes, true);
       if (hits.length === 0) return;
-      const marker = this.grid.findSpawnByMesh(hits[0].object);
-      if (marker) {
-        this.grid.removeSpawn(marker.role);
-        this.updateInfo();
-      }
+      this.grid.removeSpawnByMesh(hits[0].object);
+      this.updateInfo();
       return;
     }
 
@@ -604,6 +658,9 @@ export class EditorApp {
 
     const placed = this.grid.findByMesh(hit);
     if (placed) {
+      if (this.selectedPlacement?.id === placed.id) {
+        this.deselectPlacement();
+      }
       this.grid.removeById(placed.id);
       this.scene.remove(placed.mesh);
       this.updateInfo();
@@ -611,6 +668,7 @@ export class EditorApp {
   }
 
   private async setActiveModel(name: string): Promise<void> {
+    this.deselectPlacement();
     // Exiting collision mode when selecting a model
     if (this.collisionMode) {
       this.collisionMode = false;
@@ -634,6 +692,7 @@ export class EditorApp {
     this.ghostRotationX = 0;
     this.ghostRotationY = 0;
     this.ghostRotationZ = 0;
+    this.ghostScale = 1;
     this.removeGhost();
     this.updateInfo();
   }
@@ -649,21 +708,62 @@ export class EditorApp {
 
   private deselect(): void {
     this.activeModel = null;
+    this.ghostScale = 1;
     this.removeGhost();
     this.ui.clearSelection();
     this.updateInfo();
   }
 
+  private selectPlacement(placed: PlacedModel): void {
+    this.deselectPlacement();
+    this.selectedPlacement = placed;
+    this.selectionBox = new THREE.BoxHelper(placed.mesh, 0xffff00);
+    this.scene.add(this.selectionBox);
+    this.ui.showProperties(placed.modelName, placed.x, placed.z, placed.scale);
+  }
+
+  private deselectPlacement(): void {
+    if (this.selectionBox) {
+      this.scene.remove(this.selectionBox);
+      this.selectionBox = null;
+    }
+    this.selectedPlacement = null;
+    this.ui.hideProperties();
+  }
+
+  private onOffsetChange(x: number, z: number): void {
+    if (!this.selectedPlacement) return;
+    this.grid.updatePlacement(this.selectedPlacement.id, x, z);
+    if (this.selectionBox) this.selectionBox.update();
+  }
+
+  private onScaleChange(scale: number): void {
+    if (!this.selectedPlacement) return;
+    this.grid.updatePlacementScale(this.selectedPlacement.id, scale);
+    if (this.selectionBox) this.selectionBox.update();
+  }
+
   async placeModel(
     modelName: string, x: number, z: number,
     rotationX: number, rotationY: number, rotationZ: number,
+    scale = 1,
+    autoCollide = false,
   ): Promise<void> {
     const model = await this.catalog.loadModel(modelName);
     model.position.set(x, 0, z);
     model.rotation.set(rotationX, rotationY, rotationZ);
+    model.scale.set(scale, scale, scale);
     this.scene.add(model);
 
-    this.grid.place({ modelName, x, z, rotationX, rotationY, rotationZ, mesh: model });
+    this.grid.place({ modelName, x, z, rotationX, rotationY, rotationZ, scale, mesh: model });
+
+    // Auto-generate collider only when the user places a collidable model (not on import)
+    if (autoCollide && COLLIDABLE_MODELS.has(modelName)) {
+      const box = new THREE.Box3().setFromObject(model);
+      const collider = this.grid.addCollider(box.min.x, box.min.z, box.max.x, box.max.z, box.max.y - box.min.y);
+      this.scene.add(collider.mesh);
+    }
+
     this.updateInfo();
   }
 
@@ -675,9 +775,9 @@ export class EditorApp {
       rotationX: p.rotationX,
       rotationY: p.rotationY,
       rotationZ: p.rotationZ,
+      ...(p.scale !== 1 ? { scale: p.scale } : {}),
     }));
 
-    // Manual colliders
     const colliders: ColliderEntry[] = this.grid.getAllColliders().map((c) => ({
       minX: c.minX,
       minZ: c.minZ,
@@ -685,19 +785,6 @@ export class EditorApp {
       maxZ: c.maxZ,
       height: c.height,
     }));
-
-    // Auto-generate colliders from collidable models
-    for (const p of this.grid.getAllPlacements()) {
-      if (!COLLIDABLE_MODELS.has(p.modelName)) continue;
-      const box = new THREE.Box3().setFromObject(p.mesh);
-      colliders.push({
-        minX: box.min.x,
-        minZ: box.min.z,
-        maxX: box.max.x,
-        maxZ: box.max.z,
-        height: box.max.y - box.min.y,
-      });
-    }
 
     const ramps: RampEntry[] = this.grid.getAllRamps().map((r) => ({
       minX: r.minX,
@@ -733,6 +820,7 @@ export class EditorApp {
         await this.placeModel(
           p.modelName, p.x, p.z,
           p.rotationX ?? 0, p.rotationY ?? 0, p.rotationZ ?? 0,
+          p.scale ?? 1,
         );
       }
 
@@ -752,10 +840,12 @@ export class EditorApp {
         this.scene.add(ramp.mesh);
       }
 
-      // Import spawns
-      for (const [role, pos] of Object.entries(data.spawns)) {
-        const marker = this.grid.setSpawn(role, pos.x, pos.z);
-        this.scene.add(marker.mesh);
+      // Import spawns (arrays)
+      for (const [role, positions] of Object.entries(data.spawns)) {
+        for (const pos of positions) {
+          const marker = this.grid.setSpawn(role, pos.x, pos.z);
+          this.scene.add(marker.mesh);
+        }
       }
 
       (document.getElementById('grid-width') as HTMLInputElement).value = String(this.grid.width);
@@ -767,6 +857,7 @@ export class EditorApp {
   }
 
   private clearAll(): void {
+    this.deselectPlacement();
     const allPlacements = this.grid.clearAll();
     for (const p of allPlacements) {
       this.scene.remove(p.mesh);
@@ -815,6 +906,7 @@ export class EditorApp {
       this.spawnRole,
       this.rampMode,
       this.grid.rampCount,
+      this.activeModel ? this.ghostScale : undefined,
     );
   }
 

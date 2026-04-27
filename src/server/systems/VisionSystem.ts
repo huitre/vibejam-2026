@@ -1,7 +1,9 @@
 import { GameState } from "../state/GameState.js";
 import { PlayerState } from "../state/PlayerState.js";
 import { LAMP, STATS } from "../../shared/constants.js";
-import { PlayerRole } from "../../shared/types.js";
+import { PlayerRole, WeaponType } from "../../shared/types.js";
+
+const MELEE_DETECT_RANGE = 3;
 
 export class VisionSystem {
   constructor(private state: GameState) {}
@@ -17,8 +19,17 @@ export class VisionSystem {
     const dz = target.z - observer.z;
     const distSq = dx * dx + dz * dz;
 
-    // Samurai torch can see within torchRange
-    if (observer.role === PlayerRole.SAMURAI) {
+    // Ninja in stealth (in darkness) — only visible at melee range
+    if (target.role === PlayerRole.NINJA && target.isInStealth) {
+      // Samurai holding a torch can still reveal nearby stealthed ninja
+      if (observer.role === PlayerRole.SAMURAI && observer.weapon === WeaponType.TORCH) {
+        return distSq <= STATS.samurai.torchRange * STATS.samurai.torchRange;
+      }
+      return distSq <= MELEE_DETECT_RANGE * MELEE_DETECT_RANGE;
+    }
+
+    // Samurai holding a torch can see within torchRange
+    if (observer.role === PlayerRole.SAMURAI && observer.weapon === WeaponType.TORCH) {
       if (distSq <= STATS.samurai.torchRange * STATS.samurai.torchRange) {
         return true;
       }

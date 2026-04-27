@@ -11,4 +11,7 @@ export class GameState extends Schema {
   @type({ map: LampState }) lamps = new MapSchema<LampState>();
   @type({ map: ProjectileState }) projectiles = new MapSchema<ProjectileState>();
   @type("string") winnerSide: string = "";
+  @type("int16") currentRound: number = 0;
+  @type("int16") ninjaRoundsWon: number = 0;
+  @type("int16") defenderRoundsWon: number = 0;
 }

@@ -9,6 +9,8 @@ export interface EditorUICallbacks {
   onToggleCollisionMode: () => void;
   onToggleSpawnMode: () => void;
   onToggleRampMode: () => void;
+  onOffsetChange: (x: number, z: number) => void;
+  onScaleChange: (scale: number) => void;
 }
 
 export class EditorUI {
@@ -19,6 +21,12 @@ export class EditorUI {
   private collisionBtn: HTMLButtonElement;
   private spawnBtn: HTMLButtonElement;
   private rampBtn: HTMLButtonElement;
+  private propsPanel: HTMLDivElement;
+  private propTitle: HTMLDivElement;
+  private propOffsetX: HTMLInputElement;
+  private propOffsetZ: HTMLInputElement;
+  private propScale: HTMLInputElement;
+  private updatingProps = false;
 
   constructor(
     private catalog: ModelCatalog,
@@ -29,6 +37,11 @@ export class EditorUI {
     this.collisionBtn = document.getElementById('btn-collision') as HTMLButtonElement;
     this.spawnBtn = document.getElementById('btn-spawn') as HTMLButtonElement;
     this.rampBtn = document.getElementById('btn-ramp') as HTMLButtonElement;
+    this.propsPanel = document.getElementById('properties-panel') as HTMLDivElement;
+    this.propTitle = document.getElementById('prop-title') as HTMLDivElement;
+    this.propOffsetX = document.getElementById('prop-offset-x') as HTMLInputElement;
+    this.propOffsetZ = document.getElementById('prop-offset-z') as HTMLInputElement;
+    this.propScale = document.getElementById('prop-scale') as HTMLInputElement;
 
     // Create preview image
     const previewContainer = document.getElementById('preview-container')!;
@@ -111,6 +124,25 @@ export class EditorUI {
     this.rampBtn.addEventListener('click', () => {
       this.callbacks.onToggleRampMode();
     });
+
+    const onPropInput = () => {
+      if (this.updatingProps) return;
+      const x = parseFloat(this.propOffsetX.value);
+      const z = parseFloat(this.propOffsetZ.value);
+      if (!isNaN(x) && !isNaN(z)) {
+        this.callbacks.onOffsetChange(x, z);
+      }
+    };
+    this.propOffsetX.addEventListener('input', onPropInput);
+    this.propOffsetZ.addEventListener('input', onPropInput);
+
+    this.propScale.addEventListener('input', () => {
+      if (this.updatingProps) return;
+      const s = parseFloat(this.propScale.value);
+      if (!isNaN(s) && s >= 0.1) {
+        this.callbacks.onScaleChange(s);
+      }
+    });
   }
 
   setCollisionModeActive(active: boolean): void {
@@ -153,11 +185,13 @@ export class EditorUI {
     spawnRole = '',
     rampMode = false,
     rampCount = 0,
+    ghostScale?: number,
   ): void {
     const toDeg = (rad: number) => Math.round((rad * 180) / Math.PI) % 360;
     const rotStr = rotation
       ? ` | Rot: X${toDeg(rotation.x)} Y${toDeg(rotation.y)} Z${toDeg(rotation.z)}`
       : '';
+    const scaleStr = ghostScale != null && ghostScale !== 1 ? ` | Scale: ${ghostScale.toFixed(1)}` : '';
     const collStr = ` | Colliders: ${colliderCount}`;
     const rampStr = ` | Ramps: ${rampCount}`;
     if (rampMode) {
@@ -167,7 +201,7 @@ export class EditorUI {
     } else if (collisionMode) {
       this.infoEl.textContent = `COLLISION MODE | Placed: ${placementCount}${collStr}${rampStr}`;
     } else if (selectedModel) {
-      this.infoEl.textContent = `Selected: ${selectedModel}${rotStr} | Placed: ${placementCount}${collStr}${rampStr}`;
+      this.infoEl.textContent = `Selected: ${selectedModel}${rotStr}${scaleStr} | Placed: ${placementCount}${collStr}${rampStr}`;
     } else {
       this.infoEl.textContent = `No model selected | Placed: ${placementCount}${collStr}${rampStr}`;
     }
@@ -179,5 +213,32 @@ export class EditorUI {
       this.selectedBtn = null;
     }
     this.previewImg.style.display = 'none';
+  }
+
+  showProperties(name: string, x: number, z: number, scale: number): void {
+    this.propTitle.textContent = name;
+    this.updatingProps = true;
+    this.propOffsetX.value = String(parseFloat(x.toFixed(4)));
+    this.propOffsetZ.value = String(parseFloat(z.toFixed(4)));
+    this.propScale.value = String(parseFloat(scale.toFixed(2)));
+    this.updatingProps = false;
+    this.propsPanel.style.display = '';
+  }
+
+  hideProperties(): void {
+    this.propsPanel.style.display = 'none';
+  }
+
+  updatePropertyPosition(x: number, z: number): void {
+    this.updatingProps = true;
+    this.propOffsetX.value = String(parseFloat(x.toFixed(4)));
+    this.propOffsetZ.value = String(parseFloat(z.toFixed(4)));
+    this.updatingProps = false;
+  }
+
+  updatePropertyScale(scale: number): void {
+    this.updatingProps = true;
+    this.propScale.value = String(parseFloat(scale.toFixed(2)));
+    this.updatingProps = false;
   }
 }

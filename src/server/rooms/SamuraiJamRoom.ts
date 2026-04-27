@@ -35,8 +35,9 @@ export class SamuraiJamRoom extends Room<GameState> {
   private ninjaAssigned = false;
   private shogunAssigned = false;
   private samuraiCount = 0;
+  private samuraiMaxCount = 4;
   private lastMetadataPhase = "";
-  private spawnPositions: Record<string, { x: number; z: number }> = {};
+  private spawnPositions: Record<string, { x: number; z: number }[]> = {};
 
   onCreate(_options: any): void {
     SamuraiJamRoom.roomCounter++;
@@ -71,10 +72,15 @@ export class SamuraiJamRoom extends Room<GameState> {
       rotationY: r.rotationY,
     }));
 
-    // Scale spawn positions from level data
-    for (const [role, pos] of Object.entries(levelData.spawns)) {
-      this.spawnPositions[role] = { x: pos.x * LEVEL_SCALE, z: pos.z * LEVEL_SCALE };
+    // Scale spawn positions from level data (arrays)
+    for (const [role, positions] of Object.entries(levelData.spawns)) {
+      this.spawnPositions[role] = positions.map((pos) => ({
+        x: pos.x * LEVEL_SCALE,
+        z: pos.z * LEVEL_SCALE,
+      }));
     }
+    // Derive max samurai count from placed spawns
+    this.samuraiMaxCount = (this.spawnPositions["samurai"] ?? []).length || 4;
 
     // Extract lamp positions from "lantern" placements
     const lampPositions: LampPosition[] = levelData.placements
@@ -88,6 +94,7 @@ export class SamuraiJamRoom extends Room<GameState> {
     const boundsWidth = levelData.gridWidth * (levelData.cellSize ?? 1) * LEVEL_SCALE;
     const boundsDepth = levelData.gridDepth * (levelData.cellSize ?? 1) * LEVEL_SCALE;
     this.physics = new PhysicsSystem(colliders, boundsWidth, boundsDepth, ramps);
+    this.physics.setGameState(this.state);
     this.lighting = new LightingSystem(this.state, lampPositions);
     this.combat = new CombatSystem(this.state, this.physics, this);
     this.ability = new AbilitySystem(this.state, this.physics, this.lighting, this);
@@ -104,6 +111,10 @@ export class SamuraiJamRoom extends Room<GameState> {
       if (this.state.phase !== GamePhase.PLAYING) return;
       // Always update facing direction from camera yaw
       player.rotationY = data.rotationY;
+      // Cancel block while sprinting
+      if (data.sprint && player.isBlocking) {
+        player.isBlocking = false;
+      }
       // Only apply movement if there's actual input
       if (data.dx !== 0 || data.dz !== 0) {
         this.physics.applyMovement(player, data.dx, data.dz, data.rotationY, GAME.TICK_RATE_MS, !!data.sprint);
@@ -115,7 +126,7 @@ export class SamuraiJamRoom extends Room<GameState> {
 
     this.onMessage(ClientMsg.ATTACK, (client, _data: AttackPayload) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || !player.alive || player.isStunned) return;
+      if (!player || !player.alive || player.isStunned || player.isBlocking) return;
       if (this.state.phase !== GamePhase.PLAYING) return;
       this.combat.handleAttack(client, player);
     });
@@ -130,9 +141,41 @@ export class SamuraiJamRoom extends Room<GameState> {
     this.onMessage(ClientMsg.SELECT_WEAPON, (client, data: SelectWeaponPayload) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || player.role !== PlayerRole.SAMURAI) return;
-      if (data.weapon === WeaponType.KATANA || data.weapon === WeaponType.LANCE || data.weapon === WeaponType.TORCH) {
+      if (data.weapon === WeaponType.LANCE || data.weapon === WeaponType.TORCH) {
         player.weapon = data.weapon;
       }
+    });
+
+    this.onMessage(ClientMsg.SELECT_ROLE, (client, data: { role: string }) => {
+      if (this.state.phase !== GamePhase.LOBBY) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+
+      const wantedRole = data.role as PlayerRole;
+      if (![PlayerRole.NINJA, PlayerRole.SAMURAI, PlayerRole.SHOGUN].includes(wantedRole)) return;
+      if (player.role === wantedRole) return;
+
+      // Check if wanted role is available
+      if (wantedRole === PlayerRole.NINJA && this.ninjaAssigned && !this.isRoleOwnedBy(client.sessionId, PlayerRole.NINJA)) return;
+      if (wantedRole === PlayerRole.SHOGUN && this.shogunAssigned && !this.isRoleOwnedBy(client.sessionId, PlayerRole.SHOGUN)) return;
+      if (wantedRole === PlayerRole.SAMURAI && this.samuraiCount >= this.samuraiMaxCount && !this.isRoleOwnedBy(client.sessionId, PlayerRole.SAMURAI)) return;
+
+      // Release current role
+      this.releaseRole(player);
+
+      // Assign new role
+      this.assignRole(player, wantedRole);
+      this.claimRole(player);
+
+      client.send(ServerMsg.ROLE_ASSIGNED, { role: player.role });
+      console.log(`[Room] Player ${client.sessionId} switched to ${player.role}`);
+    });
+
+    this.onMessage(ClientMsg.BLOCK, (client, data: { blocking: boolean }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.alive || player.isStunned) return;
+      if (this.state.phase !== GamePhase.PLAYING) return;
+      player.isBlocking = !!data.blocking;
     });
 
     this.onMessage(ClientMsg.DEBUG_NOCLIP, (client) => {
@@ -159,14 +202,12 @@ export class SamuraiJamRoom extends Room<GameState> {
     // Assign ninja first, then shogun second, then samurais
     if (!this.ninjaAssigned) {
       this.assignRole(player, PlayerRole.NINJA);
-      this.ninjaAssigned = true;
     } else if (!this.shogunAssigned) {
       this.assignRole(player, PlayerRole.SHOGUN);
-      this.shogunAssigned = true;
-    } else if (this.samuraiCount < GAME.SAMURAI_COUNT) {
+    } else if (this.samuraiCount < this.samuraiMaxCount) {
       this.assignRole(player, PlayerRole.SAMURAI);
-      this.samuraiCount++;
     }
+    this.claimRole(player);
 
     this.state.players.set(client.sessionId, player);
     client.send(ServerMsg.ROLE_ASSIGNED, { role: player.role });
@@ -177,9 +218,7 @@ export class SamuraiJamRoom extends Room<GameState> {
   onLeave(client: Client, _consented: boolean): void {
     const player = this.state.players.get(client.sessionId);
     if (player) {
-      if (player.role === PlayerRole.NINJA) this.ninjaAssigned = false;
-      else if (player.role === PlayerRole.SHOGUN) this.shogunAssigned = false;
-      else this.samuraiCount--;
+      this.releaseRole(player);
     }
     this.state.players.delete(client.sessionId);
     this.setMetadata({ playerCount: this.state.players.size });
@@ -210,19 +249,21 @@ export class SamuraiJamRoom extends Room<GameState> {
   private assignRole(player: PlayerState, role: PlayerRole): void {
     player.role = role;
 
-    const defaultSpawns: Record<string, { x: number; z: number }> = {
-      ninja: { x: 40, z: 50 },
-      samurai: { x: 42, z: 50 },
-      shogun: { x: 38, z: 50 },
+    const defaultSpawns: Record<string, { x: number; z: number }[]> = {
+      ninja: [{ x: 40, z: 50 }],
+      samurai: [{ x: 42, z: 50 }],
+      shogun: [{ x: 38, z: 50 }],
     };
-    const spawn = this.spawnPositions[role] ?? defaultSpawns[role];
+    const spawnArr = this.spawnPositions[role] ?? defaultSpawns[role];
 
     switch (role) {
-      case PlayerRole.NINJA:
+      case PlayerRole.NINJA: {
+        const spawn = spawnArr[0];
         player.maxHp = STATS.ninja.maxHp;
         player.hp = STATS.ninja.maxHp;
         player.weapon = WeaponType.KATANA;
         player.x = spawn.x; player.z = spawn.z; player.y = 0;
+        player.spawnX = spawn.x; player.spawnZ = spawn.z;
         player.waterBombsLeft = STATS.ninja.waterBombCount;
         player.smokeBombsLeft = STATS.ninja.smokeBombCount;
         player.hasGrapplingHook = true;
@@ -230,24 +271,122 @@ export class SamuraiJamRoom extends Room<GameState> {
         player.maxStamina = STATS.ninja.maxStamina;
         player.caltropsLeft = STATS.ninja.caltropsCount;
         break;
-      case PlayerRole.SAMURAI:
+      }
+      case PlayerRole.SAMURAI: {
+        // Each samurai gets its own spawn position
+        const spawn = spawnArr[this.samuraiCount % spawnArr.length];
         player.maxHp = STATS.samurai.maxHp;
         player.hp = STATS.samurai.maxHp;
-        player.weapon = WeaponType.KATANA;
+        player.weapon = WeaponType.LANCE;
         player.torchesLeft = STATS.samurai.torchCount;
-        player.x = spawn.x; player.z = spawn.z; player.y = 0;
+        player.x = spawn.x;
+        player.z = spawn.z;
+        player.y = 0;
+        player.spawnX = spawn.x; player.spawnZ = spawn.z;
         player.stamina = STATS.samurai.maxStamina;
         player.maxStamina = STATS.samurai.maxStamina;
         break;
-      case PlayerRole.SHOGUN:
+      }
+      case PlayerRole.SHOGUN: {
+        const spawn = spawnArr[0];
         player.maxHp = STATS.shogun.maxHp;
         player.hp = STATS.shogun.maxHp;
         player.weapon = WeaponType.KATANA;
         player.x = spawn.x; player.z = spawn.z; player.y = 0;
+        player.spawnX = spawn.x; player.spawnZ = spawn.z;
         player.stamina = STATS.shogun.maxStamina;
         player.maxStamina = STATS.shogun.maxStamina;
         break;
+      }
     }
+  }
+
+  private releaseRole(player: PlayerState): void {
+    if (player.role === PlayerRole.NINJA) this.ninjaAssigned = false;
+    else if (player.role === PlayerRole.SHOGUN) this.shogunAssigned = false;
+    else if (player.role === PlayerRole.SAMURAI) this.samuraiCount--;
+  }
+
+  private claimRole(player: PlayerState): void {
+    if (player.role === PlayerRole.NINJA) this.ninjaAssigned = true;
+    else if (player.role === PlayerRole.SHOGUN) this.shogunAssigned = true;
+    else if (player.role === PlayerRole.SAMURAI) this.samuraiCount++;
+  }
+
+  private isRoleOwnedBy(sessionId: string, role: PlayerRole): boolean {
+    const player = this.state.players.get(sessionId);
+    return !!player && player.role === role;
+  }
+
+  resetRound(): void {
+    this.state.currentRound++;
+    this.state.winnerSide = "";
+    this.state.matchStartTime = Date.now();
+    this.state.matchTimeRemaining = GAME.MATCH_DURATION_SEC;
+
+    // Reset all players
+    this.state.players.forEach((player) => {
+      this.resetPlayer(player);
+    });
+
+    // Relight all lamps (mutate existing objects so client onChange fires)
+    this.lighting.relightAll();
+
+    // Clear projectiles
+    this.state.projectiles.clear();
+
+    // Reset bots
+    this.botSystem.resetAll();
+
+    this.state.phase = GamePhase.PLAYING;
+    this.broadcast(ServerMsg.GAME_START, { time: GAME.MATCH_DURATION_SEC });
+  }
+
+  private resetPlayer(player: PlayerState): void {
+    const role = player.role as PlayerRole;
+    const stats = STATS[role as keyof typeof STATS];
+
+    player.hp = player.maxHp;
+    player.alive = true;
+    player.x = player.spawnX;
+    player.z = player.spawnZ;
+    player.y = 0;
+    player.isAttacking = false;
+    player.isStunned = false;
+    player.isInSmoke = false;
+    player.isClimbing = false;
+    player.isSprinting = false;
+    player.isInStealth = false;
+    player.isBlocking = false;
+    player.slowFactor = 1;
+    player.lastAttackTime = 0;
+    player.stunUntil = 0;
+    player.sprintStoppedAt = 0;
+    player.channelingLampId = null;
+    player.channelingStartTime = 0;
+    player.stamina = stats.maxStamina;
+
+    switch (role) {
+      case PlayerRole.NINJA:
+        player.weapon = WeaponType.KATANA;
+        player.waterBombsLeft = STATS.ninja.waterBombCount;
+        player.smokeBombsLeft = STATS.ninja.smokeBombCount;
+        player.caltropsLeft = STATS.ninja.caltropsCount;
+        player.hasGrapplingHook = true;
+        break;
+      case PlayerRole.SAMURAI:
+        player.weapon = WeaponType.LANCE;
+        player.torchesLeft = STATS.samurai.torchCount;
+        break;
+      case PlayerRole.SHOGUN:
+        player.weapon = WeaponType.KATANA;
+        player.chargeCooldownUntil = 0;
+        break;
+    }
+  }
+
+  onDispose(): void {
+    this.winCondition.dispose();
   }
 
   private checkStartConditions(): void {
@@ -269,6 +408,17 @@ export class SamuraiJamRoom extends Room<GameState> {
   }
 
   private spawnBots(): void {
+    // Spawn ninja bot if no human ninja
+    if (!this.ninjaAssigned) {
+      const bot = new PlayerState();
+      bot.sessionId = "bot_ninja";
+      this.assignRole(bot, PlayerRole.NINJA);
+      this.state.players.set(bot.sessionId, bot);
+      this.botSystem.spawnBot(bot);
+      this.ninjaAssigned = true;
+      console.log(`[Room] Bot spawned: ${bot.sessionId} as ${bot.role}`);
+    }
+
     // Spawn shogun bot if no human shogun
     if (!this.shogunAssigned) {
       const bot = new PlayerState();
@@ -282,7 +432,7 @@ export class SamuraiJamRoom extends Room<GameState> {
 
     // Spawn samurai bots for unfilled slots
     let botIdx = 0;
-    while (this.samuraiCount < GAME.SAMURAI_COUNT) {
+    while (this.samuraiCount < this.samuraiMaxCount) {
       const bot = new PlayerState();
       bot.sessionId = `bot_samurai_${++botIdx}`;
       this.assignRole(bot, PlayerRole.SAMURAI);

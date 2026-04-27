@@ -22,7 +22,8 @@ import { CaltropVisual } from "./abilities/CaltropVisual.js";
 import { LocalPlayer } from "./entities/LocalPlayer.js";
 import { DebugPanel } from "./ui/DebugPanel.js";
 import { ServerMsg, PlayerRole, AbilityType, GamePhase } from "../shared/types.js";
-import { GAME } from "../shared/constants.js";
+import { GAME, STATS } from "../shared/constants.js";
+import type { ScoreEntry } from "./ui/GameOverScreen.js";
 
 export class Game {
   private sceneManager!: SceneManager;
@@ -48,7 +49,14 @@ export class Game {
   private portalGroup!: THREE.Group;
   private portalRingMat!: THREE.MeshBasicMaterial;
   private portalRedirecting = false;
+  private spectating = false;
+  private spectateTargetId: string | null = null;
+  private dashCooldownUntil = 0;
+  private kawariminCooldownUntil = 0;
+  private hasKawariminCheckpoint = false;
+  private kawariminCameraLock: THREE.Vector3 | null = null;
 
+  private room: Room | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private stateSync: StateSync | null = null;
   private debugPanel: DebugPanel | null = null;
@@ -67,18 +75,20 @@ export class Game {
     this.characters = new CharacterRenderer(scene);
     this.effects = new EffectRenderer(scene);
     this.caltropVisual = new CaltropVisual(scene);
+    this.combat = new CombatVisuals(scene);
     await Promise.all([
       MapBuilder.build(scene),
       this.lighting.loadModel(),
       this.characters.loadModel(),
       this.effects.loadModels(),
       this.caltropVisual.loadModel(),
+      this.combat.loadModel(),
     ]);
     this.weapons = new WeaponRenderer(this.characters);
-    this.combat = new CombatVisuals(scene);
     this.healthBars = new HealthBar(scene);
     this.smokeBomb = new SmokeBombVisual(scene);
     this.smokeBomb.setCamera(this.sceneManager.getThirdPersonCamera().getCamera());
+    this.combat.setCamera(this.sceneManager.getThirdPersonCamera().getCamera());
     this.waterBomb = new WaterBombVisual(scene);
     this.torchVisual = new TorchVisual(scene);
     this.chargeVisual = new ChargeVisual(scene);
@@ -161,6 +171,7 @@ export class Game {
 
   private onRoomJoined(room: Room): void {
     this.stopPolling();
+    this.room = room;
     this.localSessionId = room.sessionId;
 
     // Switch to RoleSelectScreen
@@ -169,12 +180,33 @@ export class Game {
     // Input sender
     this.inputSender = new InputSender(room);
 
+    // Role selection (before game starts)
+    this.ui.onSelectRole((role: string) => {
+      this.inputSender.sendSelectRole(role);
+    });
+
     const scene = this.sceneManager.getScene();
 
     // Listen for server messages
     room.onMessage(ServerMsg.ROLE_ASSIGNED, (data: { role: string }) => {
       this.localRole = data.role;
       this.ui.setRole(data.role);
+
+      // Re-create character model if it already exists (role switch)
+      if (this.characters.getEntity(this.localSessionId)) {
+        const oldEntity = this.characters.getEntity(this.localSessionId)!;
+        const pos = oldEntity.group.position;
+        this.characters.removePlayer(this.localSessionId);
+        this.healthBars.removeBar(this.localSessionId);
+        this.weapons.removeWeapon(this.localSessionId);
+        this.characters.addPlayer(this.localSessionId, data.role, pos.x, pos.y, pos.z);
+        const newEntity = this.characters.getEntity(this.localSessionId);
+        if (newEntity) {
+          this.healthBars.addBar(this.localSessionId, newEntity.group);
+          this.weapons.updateWeapon(this.localSessionId, data.role === "samurai" ? "lance" : "katana");
+        }
+      }
+
       this.localPlayer = new LocalPlayer(
         this.localSessionId, data.role,
         this.inputManager, this.inputSender,
@@ -197,6 +229,9 @@ export class Game {
     });
 
     room.onMessage(ServerMsg.GAME_START, () => {
+      this.spectating = false;
+      this.spectateTargetId = null;
+      this.ui.hideSpectator();
       this.ui.onPhaseChange(GamePhase.PLAYING);
     });
 
@@ -210,7 +245,11 @@ export class Game {
     });
 
     room.onMessage(ServerMsg.PLAYER_HIT, (data: any) => {
-      this.combat.showHitSparks(data.x, data.y ?? 0, data.z);
+      this.combat.showHitSparks(data.x, data.y ?? 0, data.z, data.backstab);
+    });
+
+    room.onMessage(ServerMsg.PLAYER_BLOCK, (data: any) => {
+      this.combat.showBlockSparks(data.x, data.y ?? 0, data.z);
     });
 
     room.onMessage(ServerMsg.ABILITY_EFFECT, (data: any) => {
@@ -248,11 +287,68 @@ export class Game {
         case AbilityType.CALTROPS:
           this.caltropVisual.createCaltrops(data.x, data.z, data.radius, data.duration);
           break;
+        case AbilityType.SHADOW_DASH:
+          this.combat.showDashTrail(data.startX, data.startZ, data.endX, data.endZ);
+          if (data.casterSessionId === this.localSessionId) {
+            this.dashCooldownUntil = Date.now() + STATS.ninja.dashCooldownMs;
+          }
+          break;
+        case AbilityType.KAWARIMI:
+          if (data.casterSessionId === this.localSessionId) {
+            this.hasKawariminCheckpoint = true;
+            this.combat.showKawariminMarker(data.x, data.z);
+          }
+          break;
+        case AbilityType.KAWARIMI_TRIGGER: {
+          const casterEntity = this.characters.getEntity(data.casterSessionId);
+          const isLocal = data.casterSessionId === this.localSessionId;
+          // Hide the ninja during the substitution animation
+          if (casterEntity) casterEntity.group.visible = false;
+
+          // Lock camera at the old position so we watch the animation
+          if (isLocal) {
+            this.kawariminCameraLock = new THREE.Vector3(data.origX, 0, data.origZ);
+          }
+
+          this.combat.showKawariminEffect(data.origX, data.origZ, () => {
+            // Animation done: show the ninja at the checkpoint
+            if (casterEntity) casterEntity.group.visible = true;
+            // Release camera lock and snap instantly to ninja's new position
+            if (isLocal) {
+              this.kawariminCameraLock = null;
+              this.sceneManager.getThirdPersonCamera().snapToTarget();
+            }
+          });
+
+          if (isLocal) {
+            this.hasKawariminCheckpoint = false;
+            this.kawariminCooldownUntil = Date.now() + STATS.ninja.kawariminCooldownMs;
+            this.combat.removeKawariminMarker();
+          }
+          break;
+        }
       }
     });
 
     room.onMessage(ServerMsg.GAME_OVER, (data: any) => {
-      this.ui.showGameOver(data.winner);
+      const state = room.state as any;
+      const players: ScoreEntry[] = [];
+      state.players.forEach((p: any, sessionId: string) => {
+        players.push({
+          sessionId,
+          role: p.role,
+          kills: p.kills,
+          deaths: p.deaths,
+          alive: p.alive,
+        });
+      });
+      this.ui.showScoreboard(
+        data.winner,
+        state.currentRound,
+        state.ninjaRoundsWon,
+        state.defenderRoundsWon,
+        players,
+      );
     });
 
     // State sync
@@ -282,7 +378,7 @@ export class Game {
         }
       },
       onPlayerChanged: (sessionId, player) => {
-        this.characters.updatePlayer(sessionId, player.x, player.y, player.z, player.rotationY);
+        this.characters.updatePlayer(sessionId, player.x, player.y, player.z, player.rotationY, player.isSprinting);
         this.healthBars.updateBar(sessionId, player.hp, player.maxHp);
 
         const entity = this.characters.getEntity(sessionId);
@@ -297,6 +393,13 @@ export class Game {
           this.healthBars.removeBar(sessionId);
         }
 
+        // Revive: player came back alive (new round)
+        if (entity && player.alive && entity.dead) {
+          this.characters.revive(sessionId);
+          this.healthBars.addBar(sessionId, entity.group);
+          this.weapons.updateWeapon(sessionId, player.weapon);
+        }
+
         if (entity) {
           if (player.isStunned && !entity.stunGroup) {
             this.characters.startStun(sessionId);
@@ -305,8 +408,20 @@ export class Game {
           }
 
           if (player.role === PlayerRole.NINJA) {
-            this.characters.setStealth(sessionId, player.isInStealth);
+            this.characters.setStealth(sessionId, player.isInStealth, sessionId === this.localSessionId);
           }
+
+          // Block weapon animation
+          if (player.isBlocking && !this.weapons.isBlockingWeapon(sessionId)) {
+            this.weapons.startBlock(sessionId);
+          } else if (!player.isBlocking && this.weapons.isBlockingWeapon(sessionId)) {
+            this.weapons.cancelBlock(sessionId);
+          }
+        }
+
+        // Auto-cycle spectator if current target dies
+        if (this.spectating && sessionId === this.spectateTargetId && !player.alive) {
+          this.cycleSpectateTarget(1);
         }
 
         if (this.localPlayer && sessionId === this.localSessionId) {
@@ -316,10 +431,36 @@ export class Game {
           if (player.role === "samurai") {
             this.ui.updateTorchCount(player.torchesLeft);
           }
+          if (player.role === "ninja") {
+            const now = Date.now();
+            const dashReady = now >= this.dashCooldownUntil;
+            const dashCooldownSec = dashReady ? 0 : Math.ceil((this.dashCooldownUntil - now) / 1000);
+            const kawariminReady = now >= this.kawariminCooldownUntil;
+            const kawariminCooldownSec = kawariminReady ? 0 : Math.ceil((this.kawariminCooldownUntil - now) / 1000);
+            this.ui.updateNinjaInventory(
+              player.smokeBombsLeft, player.caltropsLeft,
+              dashReady, dashCooldownSec,
+              player.hasKawariminCheckpoint, kawariminReady, kawariminCooldownSec,
+            );
+          }
+
+          // Block indicator
+          if (player.isBlocking) {
+            this.ui.showBlockIndicator();
+          } else {
+            this.ui.hideBlockIndicator();
+          }
 
           if (player.isStunned || !player.alive) {
             this.localPlayer.cancelBomb();
             this.localPlayer.cancelWindUp();
+            this.localPlayer.cancelBlock();
+          }
+
+          // Activate spectator mode on death
+          if (!player.alive && !this.spectating) {
+            this.spectating = true;
+            this.cycleSpectateTarget(1);
           }
         }
       },
@@ -349,17 +490,13 @@ export class Game {
     });
 
     // Debug panel
-    this.debugPanel = new DebugPanel(this.weapons, this.inputSender);
+    this.debugPanel = new DebugPanel(this.weapons, this.inputSender, this.localSessionId);
 
     // Ready button
     this.ui.onReady(() => {
       this.inputSender.sendReady();
     });
 
-    // Return to lobby from game over
-    this.ui.getGameOver().onReturn(() => {
-      this.returnToLobby();
-    });
   }
 
   private returnToLobby(): void {
@@ -376,6 +513,9 @@ export class Game {
     this.localSessionId = "";
     this.localRole = "";
     this.stateSync = null;
+    this.room = null;
+    this.spectating = false;
+    this.spectateTargetId = null;
 
     // Show room lobby
     this.ui.showRoomLobby();
@@ -385,7 +525,7 @@ export class Game {
   }
 
   private gameLoop(deltaMs: number): void {
-    if (this.localPlayer) {
+    if (this.localPlayer && !this.spectating) {
       const yaw = this.sceneManager.getThirdPersonCamera().getYaw();
       const localEntity = this.characters.getEntity(this.localSessionId);
       const px = localEntity ? localEntity.group.position.x : 0;
@@ -400,9 +540,40 @@ export class Game {
       }
     }
 
-    const localEntity = this.characters.getEntity(this.localSessionId);
-    if (localEntity) {
-      this.sceneManager.getThirdPersonCamera().followTarget(localEntity.group.position);
+    // Spectator input: cycle targets with arrow keys
+    if (this.spectating) {
+      if (this.inputManager.wasJustPressed("ArrowLeft")) {
+        this.cycleSpectateTarget(-1);
+      } else if (this.inputManager.wasJustPressed("ArrowRight")) {
+        this.cycleSpectateTarget(1);
+      }
+      this.inputManager.clearJustPressed();
+    }
+
+    // Tab scoreboard overlay
+    if (this.room && this.inputManager.isPressed("Tab")) {
+      const state = this.room.state as any;
+      const entries: ScoreEntry[] = [];
+      state.players.forEach((p: any, sid: string) => {
+        entries.push({ sessionId: sid, role: p.role, kills: p.kills, deaths: p.deaths, alive: p.alive });
+      });
+      this.ui.showScoreboardOverlay(entries);
+    } else {
+      this.ui.hideScoreboardOverlay();
+    }
+
+    // Camera follows spectate target or local player
+    let followEntity;
+    if (this.spectating && this.spectateTargetId) {
+      followEntity = this.characters.getEntity(this.spectateTargetId);
+    }
+    if (!followEntity) {
+      followEntity = this.characters.getEntity(this.localSessionId);
+    }
+    if (this.kawariminCameraLock) {
+      this.sceneManager.getThirdPersonCamera().followTarget(this.kawariminCameraLock);
+    } else if (followEntity) {
+      this.sceneManager.getThirdPersonCamera().followTarget(followEntity.group.position);
     }
 
     this.characters.interpolateAll();
@@ -425,17 +596,51 @@ export class Game {
 
     this.healthBars.updateBillboards(this.sceneManager.getThirdPersonCamera().getCamera());
 
-    if (localEntity) {
-      this.lighting.updateShadowBudget(localEntity.group.position);
-      const p = localEntity.group.position;
-      this.ui.updateDebugCoords(p.x, p.y, p.z, localEntity.currentRot);
+    if (followEntity) {
+      this.lighting.updateShadowBudget(followEntity.group.position);
+      const p = followEntity.group.position;
+      this.ui.updateDebugCoords(p.x, p.y, p.z, followEntity.currentRot);
 
-      // Portal proximity check
-      this.checkPortalProximity(p);
+      // Portal proximity check (only for local player, not spectating)
+      if (!this.spectating) {
+        this.checkPortalProximity(p);
+      }
     }
 
     // Animate portal glow
     this.updatePortal();
+  }
+
+  private getAlivePlayerIds(): string[] {
+    if (!this.room) return [];
+    const ids: string[] = [];
+    (this.room.state as any).players.forEach((player: any, sessionId: string) => {
+      if (player.alive && sessionId !== this.localSessionId) {
+        ids.push(sessionId);
+      }
+    });
+    return ids;
+  }
+
+  private cycleSpectateTarget(dir: 1 | -1): void {
+    const alive = this.getAlivePlayerIds();
+    if (alive.length === 0) {
+      this.spectateTargetId = null;
+      this.ui.hideSpectator();
+      return;
+    }
+    const currentIdx = alive.indexOf(this.spectateTargetId ?? "");
+    let nextIdx: number;
+    if (currentIdx === -1) {
+      nextIdx = 0;
+    } else {
+      nextIdx = (currentIdx + dir + alive.length) % alive.length;
+    }
+    this.spectateTargetId = alive[nextIdx];
+    // Get the role of the target
+    const targetPlayer = (this.room!.state as any).players.get(this.spectateTargetId);
+    const role = targetPlayer ? targetPlayer.role : "unknown";
+    this.ui.showSpectator(role);
   }
 
   private buildPortal(scene: THREE.Scene): void {

@@ -8,6 +8,7 @@ export interface PlacedModel {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  scale: number;
   mesh: THREE.Object3D;
 }
 
@@ -63,7 +64,7 @@ export class GridSystem {
   private ramps = new Map<number, RampBox>();
   private nextRampId = 1;
 
-  private spawns = new Map<string, SpawnMarker>();
+  private spawns = new Map<string, SpawnMarker[]>();
 
   constructor(cellSize = 1, width = 80, depth = 80) {
     this.cellSize = cellSize;
@@ -294,11 +295,6 @@ export class GridSystem {
   // ── Spawn methods ───────────────────────────────────────────────────────
 
   setSpawn(role: string, x: number, z: number): SpawnMarker {
-    const existing = this.spawns.get(role);
-    if (existing) {
-      existing.mesh.parent?.remove(existing.mesh);
-    }
-
     const color = SPAWN_COLORS[role] ?? 0xffffff;
     const geo = new THREE.CylinderGeometry(0.4, 0.4, 2, 12);
     const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 });
@@ -307,46 +303,103 @@ export class GridSystem {
     mesh.name = '__spawn__';
 
     const marker: SpawnMarker = { role, x, z, mesh };
-    this.spawns.set(role, marker);
+
+    // Samurai: append (multiple spawns allowed)
+    // Other roles: replace (single spawn)
+    if (role === 'samurai') {
+      const arr = this.spawns.get(role) ?? [];
+      arr.push(marker);
+      this.spawns.set(role, arr);
+    } else {
+      const existing = this.spawns.get(role);
+      if (existing) {
+        for (const m of existing) m.mesh.parent?.remove(m.mesh);
+      }
+      this.spawns.set(role, [marker]);
+    }
+
     return marker;
   }
 
   removeSpawn(role: string): SpawnMarker | undefined {
-    const marker = this.spawns.get(role);
-    if (marker) {
-      marker.mesh.parent?.remove(marker.mesh);
-      this.spawns.delete(role);
-    }
+    const arr = this.spawns.get(role);
+    if (!arr || arr.length === 0) return undefined;
+    const marker = arr[arr.length - 1];
+    marker.mesh.parent?.remove(marker.mesh);
+    arr.pop();
+    if (arr.length === 0) this.spawns.delete(role);
     return marker;
   }
 
-  getSpawn(role: string): SpawnMarker | undefined {
-    return this.spawns.get(role);
+  removeSpawnByMesh(object: THREE.Object3D): SpawnMarker | undefined {
+    for (const [role, arr] of this.spawns) {
+      const idx = arr.findIndex((m) => m.mesh === object);
+      if (idx !== -1) {
+        const marker = arr[idx];
+        marker.mesh.parent?.remove(marker.mesh);
+        arr.splice(idx, 1);
+        if (arr.length === 0) this.spawns.delete(role);
+        return marker;
+      }
+    }
+    return undefined;
   }
 
-  getAllSpawns(): Record<string, { x: number; z: number }> {
-    const result: Record<string, { x: number; z: number }> = {};
-    for (const [role, marker] of this.spawns) {
-      result[role] = { x: marker.x, z: marker.z };
+  getSpawn(role: string): SpawnMarker | undefined {
+    const arr = this.spawns.get(role);
+    return arr ? arr[0] : undefined;
+  }
+
+  getAllSpawns(): Record<string, { x: number; z: number }[]> {
+    const result: Record<string, { x: number; z: number }[]> = {};
+    for (const [role, arr] of this.spawns) {
+      result[role] = arr.map((m) => ({ x: m.x, z: m.z }));
     }
     return result;
   }
 
   clearSpawns(): SpawnMarker[] {
-    const all = Array.from(this.spawns.values());
+    const all: SpawnMarker[] = [];
+    for (const arr of this.spawns.values()) {
+      all.push(...arr);
+    }
     this.spawns.clear();
     return all;
   }
 
   getSpawnMeshes(): THREE.Object3D[] {
-    return Array.from(this.spawns.values()).map((s) => s.mesh);
+    const meshes: THREE.Object3D[] = [];
+    for (const arr of this.spawns.values()) {
+      for (const s of arr) meshes.push(s.mesh);
+    }
+    return meshes;
   }
 
   findSpawnByMesh(object: THREE.Object3D): SpawnMarker | undefined {
-    for (const marker of this.spawns.values()) {
-      if (marker.mesh === object) return marker;
+    for (const arr of this.spawns.values()) {
+      for (const marker of arr) {
+        if (marker.mesh === object) return marker;
+      }
     }
     return undefined;
+  }
+
+  // ── Placement update ────────────────────────────────────────────────
+
+  updatePlacement(id: number, x: number, z: number): void {
+    const placed = this.placements.get(id);
+    if (!placed) return;
+    placed.x = x;
+    placed.z = z;
+    placed.mesh.position.x = x;
+    placed.mesh.position.z = z;
+  }
+
+  updatePlacementScale(id: number, scale: number): void {
+    const placed = this.placements.get(id);
+    if (!placed) return;
+    placed.scale = scale;
+    placed.mesh.scale.set(scale, scale, scale);
   }
 
   // ── Visuals ───────────────────────────────────────────────────────────

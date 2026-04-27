@@ -55,7 +55,7 @@ const EASING_FNS: Record<EasingName, (t: number) => number> = {
 
 export const SWING_CONFIG = {
   durationMs: 600,
-  easing: "easeOutQuad" as EasingName,
+  easing: "easeOutBack" as EasingName,
 };
 
 function applyEasing(a: number, b: number, t: number): number {
@@ -88,7 +88,11 @@ function lerpKeyframes(
     ),
   };
 }
+// ─── Block pose: weapon held horizontal in front (defensive guard) ──────────
+export const BLOCK_POS = [0.0, 0.85, -0.55];
+export const BLOCK_ROT = [Math.PI / 2, 0, 0];
 
+// Duration: 600ms, Easing: easeOutBack
 // ─── Rest pose: blade held in right hand, edge forward ──────────────────────
 // Character faces away from camera (+PI), local +X = screen-right.
 // Character: feet at y=0, head top at y≈2.3
@@ -96,25 +100,49 @@ function lerpKeyframes(
 export const REST_POS = [0.17, 0.43, -0.77];
 export const REST_ROT = [1, 0.34, 1.9];
 
-// ─── Swing A: right → left horizontal slash ─────────────────────────────────
+// ─── Katana Swing A: right → left horizontal slash ──────────────────────────
 
 export const SWING_A: Keyframe[] = [
-  { t: 0.0, pos: REST_POS, rot: REST_ROT },
-  { t: 0.15, pos: [-0.41, 1.01, -0.77], rot: [1.3, 1.16, 1.9] }, // wind-up far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 1.0, pos: REST_POS, rot: REST_ROT },
+  { t: 0.0, pos: [0.17, 0.43, -0.77], rot: [1.0, 0.34, 1.9] },
+  { t: 0.15, pos: [-0.3, 1.2, -0.6], rot: [1.74, 0.4, 1.74] },
+  { t: 0.8, pos: [0.08, 0.53, 0.12], rot: [-0.33, -0.4, 2.31] },
+  { t: 1.0, pos: [0.17, 0.43, -0.77], rot: [1.0, 0.34, 1.9] },
 ];
 
-// ─── Swing B: left → right horizontal slash ─────────────────────────────────
+// ─── Katana Swing B: left → right horizontal slash ──────────────────────────
 
 export const SWING_B: Keyframe[] = [
-  { t: 0.0, pos: REST_POS, rot: REST_ROT },
-  { t: 0.15, pos: [0.9, 1.3, -0.1], rot: [0.1, 0.8, -0.2] }, // wind-up far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 0.8, pos: [0.48, 0.8, -0.41], rot: [2.15, -2.05, -1.54] }, // follow-through far right
-  { t: 1.0, pos: REST_POS, rot: REST_ROT },
+  { t: 0.0, pos: [0.17, 0.43, -0.77], rot: [1.0, 0.34, 1.9] },
+  { t: 0.15, pos: [0.14, 0.66, -0.6], rot: [1.86, -0.7, 1.59] },
+  { t: 0.8, pos: [-0.15, 0.43, -0.33], rot: [0.03, 0.31, 1.04] },
+  { t: 1.0, pos: [0.17, 0.43, -0.77], rot: [1.0, 0.34, 1.9] },
 ];
+export const LANCE_REST_POS = [-0.3, 0.85, -0.62];
+export const LANCE_REST_ROT = [1.91, -0.48, 1.99];
+
+// ─── Lance Block pose: held horizontal across the body ──────────────────────
+export const LANCE_BLOCK_POS = [0.0, 0.9, -0.5];
+export const LANCE_BLOCK_ROT = [Math.PI / 2, 0.3, 0];
+
+// ─── Lance Swing A: forward thrust (polearm stab) ──────────────────────────
+
+export const LANCE_SWING_A: Keyframe[] = [
+  { t: 0.0, pos: LANCE_REST_POS, rot: LANCE_REST_ROT },
+  { t: 0.15, pos: [0.49, 0.43, 0.15], rot: [1.47, -0.02, 3.14] },
+  { t: 0.8, pos: [0.21, 0.43, -1.58], rot: [1.56, 0.07, 3.06] },
+  { t: 1.0, pos: [2.0, 0.43, -0.15], rot: [1.46, -0.0, 3.14] },
+];
+
+// ─── Lance Swing B: wide horizontal sweep (polearm sweep) ──────────────────
+
+export const LANCE_SWING_B: Keyframe[] = [
+  { t: 0.0, pos: LANCE_REST_POS, rot: LANCE_REST_ROT },
+  { t: 0.15, pos: [-0.3, 1.2, -0.6], rot: [1.74, 0.4, 1.74] },
+  { t: 0.8, pos: [0.84, 0.53, 0.12], rot: [-0.33, -0.4, 2.31] },
+  { t: 1.0, pos: LANCE_REST_POS, rot: LANCE_REST_ROT },
+];
+
+// Duration: 400ms, Easing: easeOutBack
 
 // ─── Weapon entry ───────────────────────────────────────────────────────────
 
@@ -142,7 +170,13 @@ export class WeaponRenderer {
   private nextSwingIsA = new Map<string, boolean>();
   private torchExtras = new Map<string, TorchExtras>();
   /** Players currently in wind-up pose (holding mouseDown) */
-  private windUpStates = new Map<string, { keyframes: Keyframe[]; animating: boolean }>();
+  private windUpStates = new Map<
+    string,
+    { keyframes: Keyframe[]; animating: boolean }
+  >();
+  /** Players currently in block pose */
+  private blockStates = new Set<string>();
+  private blockAnimating = new Set<string>();
 
   constructor(characterRenderer: CharacterRenderer) {
     this.characterRenderer = characterRenderer;
@@ -249,7 +283,9 @@ export class WeaponRenderer {
       this.naginataTipZ = finalBox.min.z;
 
       this.naginataModel = model;
-      console.log(`[WeaponRenderer] Naginata loaded, tipZ=${this.naginataTipZ.toFixed(2)}, size=${rotatedSize.x.toFixed(2)}x${rotatedSize.y.toFixed(2)}x${rotatedSize.z.toFixed(2)}`);
+      console.log(
+        `[WeaponRenderer] Naginata loaded, tipZ=${this.naginataTipZ.toFixed(2)}, size=${rotatedSize.x.toFixed(2)}x${rotatedSize.y.toFixed(2)}x${rotatedSize.z.toFixed(2)}`,
+      );
     } catch (e) {
       console.warn("Failed to load naginata.glb, using fallback cylinder", e);
     }
@@ -311,8 +347,21 @@ export class WeaponRenderer {
     if (weaponType === "lance") {
       if (this.naginataModel) {
         const clone = this.naginataModel.clone(true);
-        clone.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
-        clone.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+        clone.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.material = (child.material as THREE.Material).clone();
+          }
+        });
+        clone.position.set(
+          LANCE_REST_POS[0],
+          LANCE_REST_POS[1],
+          LANCE_REST_POS[2],
+        );
+        clone.rotation.set(
+          LANCE_REST_ROT[0],
+          LANCE_REST_ROT[1],
+          LANCE_REST_ROT[2],
+        );
         group.add(clone);
         this.weapons.set(sessionId, {
           object: clone,
@@ -349,6 +398,11 @@ export class WeaponRenderer {
 
       if (this.torchModel) {
         const clone = this.torchModel.clone(true);
+        clone.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.material = (child.material as THREE.Material).clone();
+          }
+        });
         torchGroup.add(clone);
       } else {
         // Fallback procedural geometry
@@ -378,8 +432,8 @@ export class WeaponRenderer {
       light.position.y = 0.55;
       torchGroup.add(light);
 
-      torchGroup.position.set(0.5, 1.0, -0.3);
-      torchGroup.rotation.set(0.3, 0, 0);
+      torchGroup.position.set(0.4, 1.0, -0.3);
+      torchGroup.rotation.set(0, 0, 0);
       group.add(torchGroup);
 
       this.weapons.set(sessionId, {
@@ -398,6 +452,11 @@ export class WeaponRenderer {
 
     if (this.katanaModel) {
       const clone = this.katanaModel.clone(true);
+      clone.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.material = (child.material as THREE.Material).clone();
+        }
+      });
       clone.position.set(restPos[0], restPos[1], restPos[2]);
       clone.rotation.set(restRot[0], restRot[1], restRot[2]);
       group.add(clone);
@@ -435,8 +494,19 @@ export class WeaponRenderer {
     const entry = this.weapons.get(sessionId);
     if (!entry || entry.type === "torch") return;
 
+    // Cancel block if active
+    this.blockStates.delete(sessionId);
+    this.blockAnimating.delete(sessionId);
+
     const isA = this.nextSwingIsA.get(sessionId) ?? true;
-    const keyframes = isA ? SWING_A : SWING_B;
+    const isLance = entry.type === "lance";
+    const keyframes = isLance
+      ? isA
+        ? LANCE_SWING_A
+        : LANCE_SWING_B
+      : isA
+        ? SWING_A
+        : SWING_B;
     const windUp = keyframes[1];
 
     const state = { keyframes, animating: true };
@@ -446,8 +516,10 @@ export class WeaponRenderer {
     const duration = 150;
     const start = performance.now();
     const obj = entry.object;
-    const startPos = [REST_POS[0], REST_POS[1], REST_POS[2]];
-    const startRot = [REST_ROT[0], REST_ROT[1], REST_ROT[2]];
+    const restPos = isLance ? LANCE_REST_POS : REST_POS;
+    const restRot = isLance ? LANCE_REST_ROT : REST_ROT;
+    const startPos = [restPos[0], restPos[1], restPos[2]];
+    const startRot = [restRot[0], restRot[1], restRot[2]];
     const endPos = windUp.pos;
     const endRot = windUp.rot;
 
@@ -488,9 +560,110 @@ export class WeaponRenderer {
     if (!entry) return;
 
     if (entry.type === "katana" || entry.type === "lance") {
-      entry.object.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
-      entry.object.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+      const rp = entry.type === "lance" ? LANCE_REST_POS : REST_POS;
+      const rr = entry.type === "lance" ? LANCE_REST_ROT : REST_ROT;
+      entry.object.position.set(rp[0], rp[1], rp[2]);
+      entry.object.rotation.set(rr[0], rr[1], rr[2]);
     }
+  }
+
+  /** Animate weapon from rest to horizontal block pose */
+  startBlock(sessionId: string): void {
+    const entry = this.weapons.get(sessionId);
+    if (!entry || entry.type === "torch") return;
+
+    // Cancel wind-up if active
+    this.windUpStates.delete(sessionId);
+
+    this.blockStates.add(sessionId);
+    this.blockAnimating.add(sessionId);
+
+    const obj = entry.object;
+    const startPos = [obj.position.x, obj.position.y, obj.position.z];
+    const startRot = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
+    const duration = 150;
+    const start = performance.now();
+
+    const animate = (): void => {
+      if (
+        !this.blockStates.has(sessionId) ||
+        !this.blockAnimating.has(sessionId)
+      )
+        return;
+
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const eased = EASING_FNS.smoothstep(t);
+
+      const bp = entry.type === "lance" ? LANCE_BLOCK_POS : BLOCK_POS;
+      const br = entry.type === "lance" ? LANCE_BLOCK_ROT : BLOCK_ROT;
+      obj.position.set(
+        startPos[0] + (bp[0] - startPos[0]) * eased,
+        startPos[1] + (bp[1] - startPos[1]) * eased,
+        startPos[2] + (bp[2] - startPos[2]) * eased,
+      );
+      obj.rotation.set(
+        startRot[0] + (br[0] - startRot[0]) * eased,
+        startRot[1] + (br[1] - startRot[1]) * eased,
+        startRot[2] + (br[2] - startRot[2]) * eased,
+      );
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        this.blockAnimating.delete(sessionId);
+      }
+    };
+    animate();
+  }
+
+  /** Animate weapon from block pose back to rest */
+  cancelBlock(sessionId: string): void {
+    if (!this.blockStates.has(sessionId)) return;
+    this.blockStates.delete(sessionId);
+    this.blockAnimating.delete(sessionId);
+
+    const entry = this.weapons.get(sessionId);
+    if (!entry || entry.type === "torch") return;
+
+    const obj = entry.object;
+    const startPos = [obj.position.x, obj.position.y, obj.position.z];
+    const startRot = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
+    const duration = 150;
+    const start = performance.now();
+
+    const animId = Symbol();
+    (obj as any).__blockReturnAnim = animId;
+
+    const animate = (): void => {
+      // Stop if a new animation has taken over
+      if ((obj as any).__blockReturnAnim !== animId) return;
+      if (this.blockStates.has(sessionId)) return;
+
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const eased = EASING_FNS.smoothstep(t);
+
+      const rp = entry.type === "lance" ? LANCE_REST_POS : REST_POS;
+      const rr = entry.type === "lance" ? LANCE_REST_ROT : REST_ROT;
+      obj.position.set(
+        startPos[0] + (rp[0] - startPos[0]) * eased,
+        startPos[1] + (rp[1] - startPos[1]) * eased,
+        startPos[2] + (rp[2] - startPos[2]) * eased,
+      );
+      obj.rotation.set(
+        startRot[0] + (rr[0] - startRot[0]) * eased,
+        startRot[1] + (rr[1] - startRot[1]) * eased,
+        startRot[2] + (rr[2] - startRot[2]) * eased,
+      );
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    animate();
+  }
+
+  isBlockingWeapon(sessionId: string): boolean {
+    return this.blockStates.has(sessionId);
   }
 
   playSwing(sessionId: string): SwingHandle | null {
@@ -501,12 +674,21 @@ export class WeaponRenderer {
 
     const fromWindUp = this.windUpStates.has(sessionId);
     this.windUpStates.delete(sessionId);
+    this.blockStates.delete(sessionId);
+    this.blockAnimating.delete(sessionId);
 
     const now = performance.now();
 
-    // Both katana and lance (naginata) use keyframe swing with SwingHandle
+    // Pick keyframes based on weapon type and alternating direction
     const isA = this.nextSwingIsA.get(sessionId) ?? true;
-    const keyframes = isA ? SWING_A : SWING_B;
+    const isLance = entry.type === "lance";
+    const keyframes = isLance
+      ? isA
+        ? LANCE_SWING_A
+        : LANCE_SWING_B
+      : isA
+        ? SWING_A
+        : SWING_B;
     this.nextSwingIsA.set(sessionId, !isA);
 
     const duration = SWING_CONFIG.durationMs;
@@ -554,10 +736,13 @@ export class WeaponRenderer {
         }));
 
     for (const { key, entry } of entries) {
-      if (!entry || (entry.type !== "katana" && entry.type !== "lance")) continue;
+      if (!entry || (entry.type !== "katana" && entry.type !== "lance"))
+        continue;
       if (this.activeSwings.has(key)) continue;
-      entry.object.position.set(REST_POS[0], REST_POS[1], REST_POS[2]);
-      entry.object.rotation.set(REST_ROT[0], REST_ROT[1], REST_ROT[2]);
+      const rp = entry.type === "lance" ? LANCE_REST_POS : REST_POS;
+      const rr = entry.type === "lance" ? LANCE_REST_ROT : REST_ROT;
+      entry.object.position.set(rp[0], rp[1], rp[2]);
+      entry.object.rotation.set(rr[0], rr[1], rr[2]);
     }
   }
 
@@ -583,6 +768,27 @@ export class WeaponRenderer {
     this.nextSwingIsA.delete(sessionId);
     this.torchExtras.delete(sessionId);
     this.windUpStates.delete(sessionId);
+    this.blockStates.delete(sessionId);
+    this.blockAnimating.delete(sessionId);
+  }
+
+  /** Cancel any active swing/wind-up and snap weapon to the given pose (debug preview) */
+  previewPose(sessionId: string, pos: number[], rot: number[]): void {
+    const entry = this.weapons.get(sessionId);
+    if (!entry) return;
+
+    // Cancel any in-flight animation
+    this.windUpStates.delete(sessionId);
+    this.activeSwings.delete(sessionId);
+
+    entry.object.position.set(pos[0], pos[1], pos[2]);
+    entry.object.rotation.set(rot[0], rot[1], rot[2]);
+  }
+
+  /** Force-play a specific swing direction (debug). Returns the SwingHandle. */
+  playSwingByType(sessionId: string, type: "A" | "B"): SwingHandle | null {
+    this.nextSwingIsA.set(sessionId, type === "A");
+    return this.playSwing(sessionId);
   }
 
   removeAll(): void {

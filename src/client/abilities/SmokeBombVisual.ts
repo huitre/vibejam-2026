@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
-const PARTICLE_COUNT = 50;
-const PLANE_SIZE = 5;
+const PARTICLE_COUNT = 80;
+const PLANE_SIZE = 6;
 
 interface SmokeParticle {
   mesh: THREE.Mesh;
@@ -44,7 +44,7 @@ export class SmokeBombVisual {
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const mat = new THREE.MeshLambertMaterial({
-        color: 0x999999,
+        color: 0x555555,
         map: this.smokeTexture,
         transparent: true,
         opacity: 0,
@@ -74,7 +74,7 @@ export class SmokeBombVisual {
       targetRadius: radius,
       lifetime: 0,
       maxLifetime: durationMs,
-      baseOpacity: 0.6,
+      baseOpacity: 0.85,
     });
   }
 

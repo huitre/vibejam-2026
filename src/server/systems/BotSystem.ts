@@ -8,13 +8,32 @@ import { VisionSystem } from "./VisionSystem.js";
 import { STATS, LAMP } from "../../shared/constants.js";
 import { PlayerRole, WeaponType, AbilityType } from "../../shared/types.js";
 
+const SEARCH_ARRIVE_DIST = 4;
+const RELIGHT_SEARCH_RADIUS = 20;
+const PATROL_RADIUS = 20;
+const ALERT_PROPAGATION_RADIUS = 25;
+const MAX_CHASERS = 3;
+const CHASE_TIMEOUT_MS = 5000;
+const ALERT_TIMEOUT_MS = 10000;
+
+type AlertLevel = "patrol" | "alert" | "chase";
+
 interface BotData {
   sessionId: string;
   targetLampId: string | null;
+  searchX: number;
+  searchZ: number;
+  hasSearchTarget: boolean;
   stuckTicks: number;
   randomRotation: number;
   lastX: number;
   lastZ: number;
+  alertLevel: AlertLevel;
+  alertExpiry: number;
+  lastKnownNinjaX: number;
+  lastKnownNinjaZ: number;
+  patrolCenterX: number;
+  patrolCenterZ: number;
 }
 
 export class BotSystem {
@@ -33,25 +52,54 @@ export class BotSystem {
     this.bots.set(player.sessionId, {
       sessionId: player.sessionId,
       targetLampId: null,
+      searchX: 0,
+      searchZ: 0,
+      hasSearchTarget: false,
       stuckTicks: 0,
       randomRotation: 0,
       lastX: player.x,
       lastZ: player.z,
+      alertLevel: "patrol",
+      alertExpiry: 0,
+      lastKnownNinjaX: 0,
+      lastKnownNinjaZ: 0,
+      patrolCenterX: player.spawnX,
+      patrolCenterZ: player.spawnZ,
+    });
+  }
+
+  resetAll(): void {
+    this.bots.forEach((botData) => {
+      botData.targetLampId = null;
+      botData.hasSearchTarget = false;
+      botData.stuckTicks = 0;
+      botData.randomRotation = 0;
+      botData.alertLevel = "patrol";
+      botData.alertExpiry = 0;
+      const player = this.state.players.get(botData.sessionId);
+      if (player) {
+        botData.lastX = player.x;
+        botData.lastZ = player.z;
+        botData.patrolCenterX = player.spawnX;
+        botData.patrolCenterZ = player.spawnZ;
+      }
     });
   }
 
   update(deltaMs: number): void {
-    const ninja = this.findNinja();
-    if (!ninja) return;
-
     this.bots.forEach((botData) => {
       const player = this.state.players.get(botData.sessionId);
       if (!player || !player.alive || player.isStunned) return;
 
-      if (player.role === PlayerRole.SHOGUN) {
-        this.updateShogun(botData, player, ninja, deltaMs);
+      if (player.role === PlayerRole.NINJA) {
+        const shogun = this.findShogun();
+        if (shogun) this.updateNinja(botData, player, shogun, deltaMs);
+      } else if (player.role === PlayerRole.SHOGUN) {
+        const ninja = this.findNinja();
+        if (ninja) this.updateShogun(botData, player, ninja, deltaMs);
       } else if (player.role === PlayerRole.SAMURAI) {
-        this.updateSamurai(botData, player, ninja, deltaMs);
+        const ninja = this.findNinja();
+        if (ninja) this.updateSamurai(botData, player, ninja, deltaMs);
       }
 
       // Detect stuck (hasn't moved significantly since last tick)
@@ -72,6 +120,14 @@ export class BotSystem {
       if (p.role === PlayerRole.NINJA && p.alive) ninja = p;
     });
     return ninja;
+  }
+
+  private findShogun(): PlayerState | null {
+    let shogun: PlayerState | null = null;
+    this.state.players.forEach((p) => {
+      if (p.role === PlayerRole.SHOGUN && p.alive) shogun = p;
+    });
+    return shogun;
   }
 
   private distSq(ax: number, az: number, bx: number, bz: number): number {
@@ -100,6 +156,8 @@ export class BotSystem {
       if (botData.stuckTicks > 15) {
         botData.stuckTicks = 0;
         botData.randomRotation = 0;
+        // Also pick a new search target when stuck too long
+        botData.hasSearchTarget = false;
       }
     }
 
@@ -118,19 +176,126 @@ export class BotSystem {
     this.physics.applyMovement(player, 0, 1, rotationY, deltaMs, sprint);
   }
 
-  private pickRandomLamp(preferUnlit: boolean): string | null {
-    const lamps: string[] = [];
-    const unlitLamps: string[] = [];
-    this.state.lamps.forEach((lamp) => {
-      lamps.push(lamp.id);
-      if (!lamp.lit) unlitLamps.push(lamp.id);
-    });
-
-    if (preferUnlit && unlitLamps.length > 0) {
-      return unlitLamps[Math.floor(Math.random() * unlitLamps.length)];
+  private pickRandomSearchPoint(player: PlayerState): { x: number; z: number } {
+    const bounds = this.physics.getBounds();
+    const margin = 5;
+    // Pick a point at least 15 units away from current position
+    for (let i = 0; i < 10; i++) {
+      const x = margin + Math.random() * (bounds.width - margin * 2);
+      const z = margin + Math.random() * (bounds.depth - margin * 2);
+      if (this.distSq(player.x, player.z, x, z) > 15 * 15) {
+        return { x, z };
+      }
     }
-    if (lamps.length === 0) return null;
-    return lamps[Math.floor(Math.random() * lamps.length)];
+    // Fallback: just pick any random point
+    return {
+      x: margin + Math.random() * (bounds.width - margin * 2),
+      z: margin + Math.random() * (bounds.depth - margin * 2),
+    };
+  }
+
+  private pickPatrolPoint(botData: BotData): { x: number; z: number } {
+    const bounds = this.physics.getBounds();
+    const margin = 5;
+    for (let i = 0; i < 10; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * PATROL_RADIUS;
+      const x = botData.patrolCenterX + Math.cos(angle) * dist;
+      const z = botData.patrolCenterZ + Math.sin(angle) * dist;
+      // Clamp within map bounds
+      const cx = Math.max(margin, Math.min(bounds.width - margin, x));
+      const cz = Math.max(margin, Math.min(bounds.depth - margin, z));
+      if (this.distSq(botData.lastX, botData.lastZ, cx, cz) > 4 * 4) {
+        return { x: cx, z: cz };
+      }
+    }
+    return { x: botData.patrolCenterX, z: botData.patrolCenterZ };
+  }
+
+  private countChasers(): number {
+    let count = 0;
+    this.bots.forEach((bd) => {
+      if (bd.alertLevel === "chase") count++;
+    });
+    return count;
+  }
+
+  private propagateAlert(spotter: BotData, ninjaX: number, ninjaZ: number, now: number): void {
+    this.bots.forEach((bd) => {
+      if (bd.sessionId === spotter.sessionId) return;
+      const player = this.state.players.get(bd.sessionId);
+      if (!player || !player.alive || player.role !== PlayerRole.SAMURAI) return;
+      const dSq = this.distSq(player.x, player.z,
+        this.state.players.get(spotter.sessionId)!.x,
+        this.state.players.get(spotter.sessionId)!.z);
+      if (dSq > ALERT_PROPAGATION_RADIUS * ALERT_PROPAGATION_RADIUS) return;
+      if (bd.alertLevel === "patrol") {
+        bd.alertLevel = "alert";
+        bd.lastKnownNinjaX = ninjaX;
+        bd.lastKnownNinjaZ = ninjaZ;
+        bd.alertExpiry = now + ALERT_TIMEOUT_MS;
+        bd.hasSearchTarget = false;
+      }
+    });
+  }
+
+  // ── Ninja AI ───────────────────────────────────────────────
+
+  private updateNinja(botData: BotData, player: PlayerState, shogun: PlayerState, deltaMs: number): void {
+    const dSq = this.distSq(player.x, player.z, shogun.x, shogun.z);
+
+    // Find nearest defender (samurai or shogun) that can see us
+    const nearestThreat = this.findNearestThreat(player);
+    const threatDSq = nearestThreat
+      ? this.distSq(player.x, player.z, nearestThreat.x, nearestThreat.z)
+      : Infinity;
+
+    // Drop caltrops when a defender is chasing close behind
+    if (nearestThreat && threatDSq < 6 * 6 && player.caltropsLeft > 0) {
+      this.ability.handleAbility(null, player, { ability: AbilityType.CALTROPS });
+    }
+
+    // Throw smoke bomb to escape when surrounded or low HP
+    if (nearestThreat && threatDSq < 5 * 5 && player.smokeBombsLeft > 0 && player.hp < player.maxHp * 0.5) {
+      this.ability.handleAbility(null, player, {
+        ability: AbilityType.SMOKE_BOMB,
+        targetX: player.x,
+        targetZ: player.z,
+      });
+    }
+
+    // Attack nearby defender if in range
+    if (nearestThreat && threatDSq <= STATS.ninja.attackRange * STATS.ninja.attackRange) {
+      this.faceTarget(player, nearestThreat);
+      this.combat.handleAttack(null, player);
+      return;
+    }
+
+    // Primary objective: reach and kill the shogun
+    const attackRange = STATS.ninja.attackRange;
+    if (dSq <= attackRange * attackRange) {
+      this.faceTarget(player, shogun);
+      this.combat.handleAttack(null, player);
+    } else {
+      // Sprint toward shogun when far, walk when close to be sneaky
+      const sprint = dSq > 15 * 15;
+      this.moveToward(botData, player, shogun.x, shogun.z, deltaMs, sprint);
+    }
+  }
+
+  private findNearestThreat(ninja: PlayerState): PlayerState | null {
+    let nearest: PlayerState | null = null;
+    let nearestDSq = Infinity;
+    this.state.players.forEach((p) => {
+      if (p.sessionId === ninja.sessionId || !p.alive) return;
+      if (p.role !== PlayerRole.SAMURAI && p.role !== PlayerRole.SHOGUN) return;
+      const dSq = this.distSq(ninja.x, ninja.z, p.x, p.z);
+      if (dSq < nearestDSq) {
+        nearestDSq = dSq;
+        nearest = p;
+      }
+    });
+    return nearest;
   }
 
   // ── Shogun AI ──────────────────────────────────────────────
@@ -140,9 +305,13 @@ export class BotSystem {
     const dSq = this.distSq(player.x, player.z, ninja.x, ninja.z);
 
     if (!canSeeNinja) {
-      this.patrolToLamp(botData, player, deltaMs, false);
+      botData.hasSearchTarget = false;
+      this.searchRandom(botData, player, deltaMs);
       return;
     }
+
+    // Saw ninja — clear search target
+    botData.hasSearchTarget = false;
 
     // Try charge when ninja is at medium range (~5-10 units)
     if (dSq > 5 * 5 && dSq < 10 * 10) {
@@ -168,15 +337,79 @@ export class BotSystem {
   private updateSamurai(botData: BotData, player: PlayerState, ninja: PlayerState, deltaMs: number): void {
     const canSeeNinja = this.vision.isVisibleTo(player, ninja);
     const dSq = this.distSq(player.x, player.z, ninja.x, ninja.z);
+    const now = Date.now();
 
-    // Priority: relight unlit lamps when ninja not visible
-    if (!canSeeNinja && player.torchesLeft > 0) {
-      const unlitLamp = this.lighting.findNearestUnlitLamp(player.x, player.z, 30);
+    if (canSeeNinja) {
+      // Saw ninja — update known position
+      botData.lastKnownNinjaX = ninja.x;
+      botData.lastKnownNinjaZ = ninja.z;
+      botData.hasSearchTarget = false;
+
+      if (player.channelingLampId) {
+        player.channelingLampId = null;
+        player.channelingStartTime = 0;
+      }
+      if (player.weapon !== WeaponType.LANCE) player.weapon = WeaponType.LANCE;
+
+      // Decide chase vs alert based on chaser count
+      if (botData.alertLevel !== "chase") {
+        if (this.countChasers() < MAX_CHASERS) {
+          botData.alertLevel = "chase";
+        } else {
+          botData.alertLevel = "alert";
+          botData.alertExpiry = now + ALERT_TIMEOUT_MS;
+        }
+      }
+
+      // Propagate alert to nearby bots
+      this.propagateAlert(botData, ninja.x, ninja.z, now);
+
+      if (botData.alertLevel === "chase") {
+        // Sprint + attack
+        const attackRange = STATS.samurai.lanceRange;
+        if (dSq <= attackRange * attackRange) {
+          this.faceTarget(player, ninja);
+          this.combat.handleAttack(null, player);
+        } else {
+          this.moveToward(botData, player, ninja.x, ninja.z, deltaMs, true);
+        }
+      } else {
+        // Alert: move toward ninja without sprinting
+        this.moveToward(botData, player, ninja.x, ninja.z, deltaMs, false);
+      }
+      return;
+    }
+
+    // Can't see ninja — handle alert level transitions
+    if (botData.alertLevel === "chase") {
+      // Lost sight while chasing → drop to alert
+      botData.alertLevel = "alert";
+      botData.alertExpiry = now + CHASE_TIMEOUT_MS;
+      botData.hasSearchTarget = false;
+    }
+
+    if (botData.alertLevel === "alert") {
+      if (player.weapon !== WeaponType.LANCE) player.weapon = WeaponType.LANCE;
+
+      // Move toward last known ninja position
+      const dToKnown = this.distSq(player.x, player.z, botData.lastKnownNinjaX, botData.lastKnownNinjaZ);
+      if (dToKnown < SEARCH_ARRIVE_DIST * SEARCH_ARRIVE_DIST || now > botData.alertExpiry) {
+        // Arrived at last known position or alert expired → return to patrol
+        botData.alertLevel = "patrol";
+        botData.hasSearchTarget = false;
+      } else {
+        this.moveToward(botData, player, botData.lastKnownNinjaX, botData.lastKnownNinjaZ, deltaMs, false);
+      }
+      return;
+    }
+
+    // PATROL mode: relight lamps near patrol center, then patrol zone
+    if (player.torchesLeft > 0) {
+      const unlitLamp = this.lighting.findNearestUnlitLamp(player.x, player.z, RELIGHT_SEARCH_RADIUS);
       if (unlitLamp) {
         const lampDSq = this.distSq(player.x, player.z, unlitLamp.x, unlitLamp.z);
 
         if (lampDSq <= LAMP.RELIGHT_RANGE * LAMP.RELIGHT_RANGE) {
-          // Close enough: switch to torch and channel relight
           if (player.weapon !== WeaponType.TORCH) {
             player.weapon = WeaponType.TORCH;
           }
@@ -186,42 +419,15 @@ export class BotSystem {
           return;
         }
 
-        // Walk toward the unlit lamp
-        if (player.weapon !== WeaponType.KATANA) player.weapon = WeaponType.KATANA;
+        if (player.weapon !== WeaponType.LANCE) player.weapon = WeaponType.LANCE;
         this.moveToward(botData, player, unlitLamp.x, unlitLamp.z, deltaMs, false);
         return;
       }
     }
 
-    if (canSeeNinja) {
-      // Cancel any channeling
-      if (player.channelingLampId) {
-        player.channelingLampId = null;
-        player.channelingStartTime = 0;
-      }
-
-      // Switch weapon by distance: lance at medium, katana at close
-      if (dSq > STATS.samurai.lanceRange * STATS.samurai.lanceRange) {
-        if (player.weapon !== WeaponType.KATANA) player.weapon = WeaponType.KATANA;
-      } else if (dSq > STATS.samurai.katanaRange * STATS.samurai.katanaRange) {
-        if (player.weapon !== WeaponType.LANCE) player.weapon = WeaponType.LANCE;
-      }
-
-      const attackRange = player.weapon === WeaponType.LANCE
-        ? STATS.samurai.lanceRange
-        : STATS.samurai.katanaRange;
-
-      if (dSq <= attackRange * attackRange) {
-        this.faceTarget(player, ninja);
-        this.combat.handleAttack(null, player);
-      } else {
-        this.moveToward(botData, player, ninja.x, ninja.z, deltaMs, true);
-      }
-    } else {
-      // Patrol: prefer unlit lamps as waypoints
-      if (player.weapon !== WeaponType.KATANA) player.weapon = WeaponType.KATANA;
-      this.patrolToLamp(botData, player, deltaMs, true);
-    }
+    // Patrol around spawn
+    if (player.weapon !== WeaponType.LANCE) player.weapon = WeaponType.LANCE;
+    this.patrolZone(botData, player, deltaMs);
   }
 
   // ── Shared helpers ─────────────────────────────────────────
@@ -232,25 +438,38 @@ export class BotSystem {
     player.rotationY = Math.atan2(dx, dz);
   }
 
-  private patrolToLamp(botData: BotData, player: PlayerState, deltaMs: number, preferUnlit: boolean): void {
-    if (!botData.targetLampId) {
-      botData.targetLampId = this.pickRandomLamp(preferUnlit);
+  private patrolZone(botData: BotData, player: PlayerState, deltaMs: number): void {
+    if (!botData.hasSearchTarget) {
+      const pt = this.pickPatrolPoint(botData);
+      botData.searchX = pt.x;
+      botData.searchZ = pt.z;
+      botData.hasSearchTarget = true;
     }
-    if (!botData.targetLampId) return;
 
-    const lamp = this.state.lamps.get(botData.targetLampId);
-    if (!lamp) {
-      botData.targetLampId = null;
+    const dSq = this.distSq(player.x, player.z, botData.searchX, botData.searchZ);
+    if (dSq < SEARCH_ARRIVE_DIST * SEARCH_ARRIVE_DIST) {
+      botData.hasSearchTarget = false;
       return;
     }
 
-    const dSq = this.distSq(player.x, player.z, lamp.x, lamp.z);
-    if (dSq < 3 * 3) {
-      // Arrived at lamp, pick next
-      botData.targetLampId = null;
+    this.moveToward(botData, player, botData.searchX, botData.searchZ, deltaMs, false);
+  }
+
+  private searchRandom(botData: BotData, player: PlayerState, deltaMs: number): void {
+    if (!botData.hasSearchTarget) {
+      const pt = this.pickRandomSearchPoint(player);
+      botData.searchX = pt.x;
+      botData.searchZ = pt.z;
+      botData.hasSearchTarget = true;
+    }
+
+    const dSq = this.distSq(player.x, player.z, botData.searchX, botData.searchZ);
+    if (dSq < SEARCH_ARRIVE_DIST * SEARCH_ARRIVE_DIST) {
+      // Arrived — pick a new search point
+      botData.hasSearchTarget = false;
       return;
     }
 
-    this.moveToward(botData, player, lamp.x, lamp.z, deltaMs, false);
+    this.moveToward(botData, player, botData.searchX, botData.searchZ, deltaMs, false);
   }
 }

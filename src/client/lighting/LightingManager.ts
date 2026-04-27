@@ -9,7 +9,7 @@ import { toonGradientMap } from "../render/ToonGradient.js";
  * Three.js compiles shaders with NUM_POINT_LIGHTS = POOL_SIZE (constant),
  * so the per-pixel cost stays fixed regardless of total lamp count.
  */
-const POOL_SIZE = 8;
+const POOL_SIZE = 16;
 const LIGHT_COLOR = 0xfff3ba;
 
 interface RelightingEntry {

@@ -22,6 +22,7 @@ export class LocalPlayer {
   private cancelWindUpCallback?: () => void;
   private attackCooldown = 0;
   private isWindingUp = false;
+  private isBlocking = false;
 
   // Bomb aiming state
   private selectedBomb: BombKind = null;
@@ -57,6 +58,17 @@ export class LocalPlayer {
 
     if (this.attackCooldown > 0) {
       this.attackCooldown = Math.max(0, this.attackCooldown - deltaMs);
+    }
+
+    // --- Blocking (right click) ---
+    if (this.input.wasJustPressed(bindings.block) && !this.isWindingUp && this.attackCooldown <= 0 && !wantsSprint) {
+      this.isBlocking = true;
+      this.sender.sendBlock(true);
+      this.cancelBomb();
+    }
+    if (this.isBlocking && this.input.wasJustReleased(bindings.block)) {
+      this.isBlocking = false;
+      this.sender.sendBlock(false);
     }
 
     // --- Ninja bomb selection (E = water, R = smoke) ---
@@ -120,7 +132,7 @@ export class LocalPlayer {
       }
     } else {
       // --- Normal attack: hold = wind-up, release = swing ---
-      if (this.input.wasJustPressed(bindings.attack) && this.attackCooldown <= 0 && !this.isWindingUp) {
+      if (this.input.wasJustPressed(bindings.attack) && this.attackCooldown <= 0 && !this.isWindingUp && !this.isBlocking) {
         if (this.entity.weapon !== "torch") {
           this.isWindingUp = true;
           this.windUpCallback?.();
@@ -142,6 +154,18 @@ export class LocalPlayer {
       }
     }
 
+    if (this.input.wasJustPressed(bindings.dash)) {
+      if (this.entity.role === PlayerRole.NINJA) {
+        this.sender.sendAbility(AbilityType.SHADOW_DASH);
+      }
+    }
+
+    if (this.input.wasJustPressed(bindings.interact)) {
+      if (this.entity.role === PlayerRole.NINJA) {
+        this.sender.sendAbility(AbilityType.KAWARIMI);
+      }
+    }
+
     if (this.input.wasJustPressed(bindings.ability1)) {
       if (this.entity.role === PlayerRole.NINJA) {
         this.sender.sendAbility(AbilityType.GRAPPLING_HOOK);
@@ -155,7 +179,7 @@ export class LocalPlayer {
     if (this.input.wasJustPressed(bindings.switchWeapon)) {
       if (this.entity.role === PlayerRole.SAMURAI) {
         this.cancelWindUp();
-        const cycle: Record<string, string> = { katana: "lance", lance: "torch", torch: "katana" };
+        const cycle: Record<string, string> = { lance: "torch", torch: "lance" };
         const newWeapon = cycle[this.entity.weapon] ?? "katana";
         this.sender.sendSelectWeapon(newWeapon);
       }
@@ -168,6 +192,13 @@ export class LocalPlayer {
     if (this.isWindingUp) {
       this.isWindingUp = false;
       this.cancelWindUpCallback?.();
+    }
+  }
+
+  cancelBlock(): void {
+    if (this.isBlocking) {
+      this.isBlocking = false;
+      this.sender.sendBlock(false);
     }
   }
 

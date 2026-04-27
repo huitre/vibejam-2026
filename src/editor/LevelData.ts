@@ -5,6 +5,7 @@ export interface PlacementEntry {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  scale?: number;
 }
 
 export interface ColliderEntry {
@@ -39,7 +40,7 @@ export interface LevelExport {
   placements: PlacementEntry[];
   colliders: ColliderEntry[];
   ramps: RampEntry[];
-  spawns: Record<string, SpawnEntry>;
+  spawns: Record<string, SpawnEntry[]>;
 }
 
 export function exportToJSON(
@@ -48,7 +49,7 @@ export function exportToJSON(
   cellSize: number,
   placements: PlacementEntry[],
   colliders: ColliderEntry[],
-  spawns: Record<string, SpawnEntry> = {},
+  spawns: Record<string, SpawnEntry[]> = {},
   ramps: RampEntry[] = [],
 ): string {
   const data: LevelExport = { gridWidth, gridDepth, cellSize, placements, colliders, ramps, spawns };
@@ -56,7 +57,7 @@ export function exportToJSON(
 }
 
 export function importFromJSON(json: string): LevelExport {
-  const data: LevelExport = JSON.parse(json);
+  const data = JSON.parse(json);
   if (
     typeof data.gridWidth !== 'number' ||
     typeof data.gridDepth !== 'number' ||
@@ -67,8 +68,20 @@ export function importFromJSON(json: string): LevelExport {
   data.cellSize = data.cellSize ?? 1;
   data.colliders = data.colliders ?? [];
   data.ramps = data.ramps ?? [];
-  data.spawns = data.spawns ?? {};
-  return data;
+
+  // Normalize spawns: old format (single object per role) → array of 1
+  const rawSpawns = data.spawns ?? {};
+  const spawns: Record<string, SpawnEntry[]> = {};
+  for (const [role, val] of Object.entries(rawSpawns)) {
+    if (Array.isArray(val)) {
+      spawns[role] = val as SpawnEntry[];
+    } else {
+      spawns[role] = [val as SpawnEntry];
+    }
+  }
+  data.spawns = spawns;
+
+  return data as LevelExport;
 }
 
 export function downloadJSON(content: string, filename = 'level.json') {

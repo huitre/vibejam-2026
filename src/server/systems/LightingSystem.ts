@@ -30,6 +30,12 @@ export class LightingSystem {
     }
   }
 
+  relightAll(): void {
+    this.state.lamps.forEach((lamp) => {
+      lamp.lit = true;
+    });
+  }
+
   extinguishLamp(lampId: string): boolean {
     const lamp = this.state.lamps.get(lampId);
     if (lamp && lamp.lit) {

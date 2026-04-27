@@ -4,6 +4,7 @@ export interface KeyBindings {
   left: string;
   right: string;
   attack: string;
+  block: string;
   ability1: string;
   ability2: string;
   ability3: string;
@@ -11,6 +12,7 @@ export interface KeyBindings {
   switchWeapon: string;
   sprint: string;
   caltrops: string;
+  dash: string;
 }
 
 export const DEFAULT_BINDINGS: KeyBindings = {
@@ -19,6 +21,7 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   left: "KeyA",
   right: "KeyD",
   attack: "MouseLeft",
+  block: "MouseRight",
   ability1: "KeyQ",
   ability2: "KeyE",
   ability3: "KeyR",
@@ -26,4 +29,5 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   switchWeapon: "KeyT",
   sprint: "ShiftLeft",
   caltrops: "KeyC",
+  dash: "Space",
 };

@@ -7,15 +7,15 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 const OBJ_MODELS = [
   "base_map",
   "bridge",
-  "castle_wall_corner",
-  "castle_tower",
-  "corner_tower",
+  "tower",
   "front_gate",
   "gate_big",
   "gate_door",
-  "tower",
-  "tree_1",
+  "corner_tower",
+  "castle_wall_corner",
   "castle_wall",
+  "castle_tower",
+  "tree_1",
   "wall_corner_l",
   "wall_corner_m",
   "wall_l",
@@ -213,19 +213,11 @@ export class ModelCatalog {
     return this.centerAndWrap(root, def.name);
   }
 
-  /** Models whose OBJ origin is already the desired pivot (e.g. inner corner of an L-shape) */
-  private static readonly KEEP_XZ_PIVOT = new Set(['castle_wall_corner']);
-
   private centerAndWrap(obj: THREE.Object3D, name: string): THREE.Group {
     // Align min-corner (bottom-left) to local origin so the grid point = bottom-left edge.
     // This lets pieces of different sizes align their edges at grid boundaries.
     const box = new THREE.Box3().setFromObject(obj);
-    if (ModelCatalog.KEEP_XZ_PIVOT.has(name)) {
-      // Only ground-align Y; keep XZ pivot from the OBJ
-      obj.position.y = -box.min.y;
-    } else {
-      obj.position.set(-box.min.x, -box.min.y, -box.min.z);
-    }
+    obj.position.set(-box.min.x, -box.min.y, -box.min.z);
 
     const wrapper = new THREE.Group();
     wrapper.add(obj);

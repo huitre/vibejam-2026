@@ -1,7 +1,7 @@
 import { RoomLobbyScreen } from "./RoomLobbyScreen.js";
 import { RoleSelectScreen } from "./RoleSelectScreen.js";
 import { HUD } from "./HUD.js";
-import { GameOverScreen } from "./GameOverScreen.js";
+import { GameOverScreen, ScoreEntry } from "./GameOverScreen.js";
 import { GamePhase } from "../../shared/types.js";
 
 export class UIManager {
@@ -55,10 +55,6 @@ export class UIManager {
     this.roomLobby.show();
   }
 
-  getGameOver(): GameOverScreen {
-    return this.gameOver;
-  }
-
   setRole(role: string): void {
     this.roleSelect.setRole(role);
     this.hud.setRole(role);
@@ -82,8 +78,8 @@ export class UIManager {
     this.hud.updateStamina(stamina, maxStamina);
   }
 
-  showGameOver(winner: string): void {
-    this.gameOver.setWinner(winner);
+  showScoreboard(winner: string, round: number, ninjaWins: number, defenderWins: number, players: ScoreEntry[]): void {
+    this.gameOver.setScoreboard(winner, round, ninjaWins, defenderWins, players);
     this.gameOver.show();
   }
 
@@ -101,6 +97,42 @@ export class UIManager {
 
   updateTorchCount(count: number): void {
     this.hud.updateTorchCount(count);
+  }
+
+  updateNinjaInventory(
+    smokeBombs: number, caltrops: number,
+    dashReady: boolean = true, dashCooldownSec: number = 0,
+    hasKawariminCheckpoint: boolean = false, kawariminReady: boolean = true, kawariminCooldownSec: number = 0,
+  ): void {
+    this.hud.updateNinjaInventory(smokeBombs, caltrops, dashReady, dashCooldownSec, hasKawariminCheckpoint, kawariminReady, kawariminCooldownSec);
+  }
+
+  showSpectator(role: string): void {
+    this.hud.showSpectator(role);
+  }
+
+  hideSpectator(): void {
+    this.hud.hideSpectator();
+  }
+
+  showScoreboardOverlay(players: ScoreEntry[]): void {
+    this.hud.showScoreboardOverlay(players);
+  }
+
+  hideScoreboardOverlay(): void {
+    this.hud.hideScoreboardOverlay();
+  }
+
+  showBlockIndicator(): void {
+    this.hud.showBlockIndicator();
+  }
+
+  hideBlockIndicator(): void {
+    this.hud.hideBlockIndicator();
+  }
+
+  onSelectRole(callback: (role: string) => void): void {
+    this.roleSelect.onSelectRole(callback);
   }
 
   onReady(callback: () => void): void {

@@ -13,6 +13,7 @@ export interface LevelPlacement {
   rotationX: number;
   rotationY: number;
   rotationZ: number;
+  scale?: number;
 }
 
 export interface LevelRamp {
@@ -39,7 +40,7 @@ export interface LevelData {
   placements: LevelPlacement[];
   colliders: LevelCollider[];
   ramps: LevelRamp[];
-  spawns: Record<string, LevelSpawn>;
+  spawns: Record<string, LevelSpawn[]>;
 }
 
 export function parseLevelJSON(json: string): LevelData {
@@ -51,6 +52,18 @@ export function parseLevelJSON(json: string): LevelData {
   ) {
     throw new Error("Invalid level JSON format");
   }
+
+  // Normalize spawns: old format (single object per role) → array of 1
+  const rawSpawns = data.spawns ?? {};
+  const spawns: Record<string, LevelSpawn[]> = {};
+  for (const [role, val] of Object.entries(rawSpawns)) {
+    if (Array.isArray(val)) {
+      spawns[role] = val as LevelSpawn[];
+    } else {
+      spawns[role] = [val as LevelSpawn];
+    }
+  }
+
   return {
     gridWidth: data.gridWidth,
     gridDepth: data.gridDepth,
@@ -74,6 +87,6 @@ export function parseLevelJSON(json: string): LevelData {
       ascending: r.ascending ?? true,
       rotationY: r.rotationY ?? 0,
     })),
-    spawns: data.spawns ?? {},
+    spawns,
   };
 }

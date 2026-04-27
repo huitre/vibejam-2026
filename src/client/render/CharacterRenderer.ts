@@ -14,11 +14,15 @@ const STUN_ORBIT_HEIGHT = 2.4;
 const STUN_STAR_COLOR = 0xffdd00;
 const STUN_SPIN_SPEED = 4; // radians per second
 
+const SPRINT_TILT = -20 * (Math.PI / 180); // ~20° forward lean
+
 interface CharacterEntity {
   group: THREE.Group;
   targetPos: THREE.Vector3;
   targetRot: number;
   currentRot: number;
+  currentTiltX: number;
+  isSprinting: boolean;
   currentWeapon: string;
   dead: boolean;
   deathStartTime: number;
@@ -186,11 +190,15 @@ export class CharacterRenderer {
     group.position.set(x, y, z);
     this.scene.add(group);
 
+    group.rotation.order = "YXZ";
+
     this.entities.set(sessionId, {
       group,
       targetPos: new THREE.Vector3(x, y, z),
       targetRot: 0,
       currentRot: 0,
+      currentTiltX: 0,
+      isSprinting: false,
       currentWeapon: "",
       dead: false,
       deathStartTime: 0,
@@ -222,12 +230,13 @@ export class CharacterRenderer {
     }
   }
 
-  updatePlayer(sessionId: string, x: number, y: number, z: number, rotation: number): void {
+  updatePlayer(sessionId: string, x: number, y: number, z: number, rotation: number, isSprinting = false): void {
     const entity = this.entities.get(sessionId);
     if (!entity) return;
 
     entity.targetPos.set(x, y, z);
     entity.targetRot = rotation;
+    entity.isSprinting = isSprinting;
   }
 
   playDeath(sessionId: string): void {
@@ -235,8 +244,25 @@ export class CharacterRenderer {
     if (!entity || entity.dead) return;
     entity.dead = true;
     entity.deathStartTime = performance.now();
-    // Switch to YXZ so rotation.x tips forward in character-local space
-    entity.group.rotation.order = "YXZ";
+  }
+
+  revive(sessionId: string): void {
+    const entity = this.entities.get(sessionId);
+    if (!entity || !entity.dead) return;
+    entity.dead = false;
+    entity.deathStartTime = 0;
+    entity.deathFaded = false;
+    entity.group.rotation.x = 0;
+    // Restore material opacity
+    entity.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mat = child.material;
+        if (mat instanceof THREE.Material) {
+          mat.transparent = false;
+          mat.opacity = 1.0;
+        }
+      }
+    });
   }
 
   startStun(sessionId: string): void {
@@ -296,6 +322,11 @@ export class CharacterRenderer {
       entity.currentRot += rotDiff * lerpFactor;
       entity.group.rotation.y = entity.currentRot + Math.PI;
 
+      // Sprint forward lean
+      const targetTilt = entity.isSprinting ? SPRINT_TILT : 0;
+      entity.currentTiltX += (targetTilt - entity.currentTiltX) * lerpFactor;
+      entity.group.rotation.x = entity.currentTiltX;
+
       // Spin stun stars
       if (entity.stunGroup) {
         entity.stunGroup.rotation.y = time * STUN_SPIN_SPEED;
@@ -331,16 +362,28 @@ export class CharacterRenderer {
     return this.entities.get(sessionId);
   }
 
-  setStealth(sessionId: string, isStealth: boolean): void {
+  setStealth(sessionId: string, isStealth: boolean, isLocal: boolean): void {
     const entity = this.entities.get(sessionId);
     if (!entity || entity.dead) return;
+
+    // Local ninja sees itself semi-transparent; others see nothing
+    const opacity = isStealth ? (isLocal ? 0.3 : 0) : 1.0;
 
     entity.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const mat = child.material;
         if (mat instanceof THREE.Material) {
           mat.transparent = true;
-          mat.opacity = isStealth ? 0.3 : 1.0;
+          mat.opacity = opacity;
+
+          // Red outline only for local ninja when invisible in darkness
+          if (isLocal && isStealth) {
+            mat.userData.outlineParameters = { thickness: 0.004, color: [1, 0, 0], alpha: 1.0 };
+          } else if (!isLocal && isStealth) {
+            mat.userData.outlineParameters = { visible: false };
+          } else {
+            mat.userData.outlineParameters = { visible: true, thickness: 0.003, color: [0, 0, 0], alpha: 1.0 };
+          }
         }
       }
     });

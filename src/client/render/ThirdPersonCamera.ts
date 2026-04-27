@@ -120,6 +120,14 @@ export class ThirdPersonCamera {
     this.targetPos.copy(target);
   }
 
+  /** Snap camera instantly to the current target (skip lerp). */
+  snapToTarget(): void {
+    this.currentPosition.copy(this.calculateIdealOffset());
+    this.currentLookat.copy(this.calculateIdealLookat());
+    this.camera.position.copy(this.currentPosition);
+    this.camera.lookAt(this.currentLookat);
+  }
+
   getCamera(): THREE.PerspectiveCamera {
     return this.camera;
   }

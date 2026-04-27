@@ -12,12 +12,21 @@ export class PhysicsSystem {
   private ramps: LevelRamp[];
   private boundsWidth: number;
   private boundsDepth: number;
+  private state: GameState | null = null;
 
   constructor(colliders: LevelCollider[], boundsWidth: number, boundsDepth: number, ramps: LevelRamp[] = []) {
     this.colliders = colliders;
     this.ramps = ramps;
     this.boundsWidth = boundsWidth;
     this.boundsDepth = boundsDepth;
+  }
+
+  setGameState(state: GameState): void {
+    this.state = state;
+  }
+
+  getBounds(): { width: number; depth: number } {
+    return { width: this.boundsWidth, depth: this.boundsDepth };
   }
 
   toggleNoclip(sessionId: string): void {
@@ -63,16 +72,16 @@ export class PhysicsSystem {
     const newX = player.x + worldDx;
     const newZ = player.z + worldDz;
 
-    // Check collision (skip for noclip players)
-    if (this.noclipPlayers.has(player.sessionId) || !this.collidesWithWall(newX, newZ)) {
+    // Check collision against walls and other players (skip for noclip)
+    if (this.noclipPlayers.has(player.sessionId) || !this.collidesAtPosition(newX, newZ, player.sessionId)) {
       player.x = Math.max(PLAYER_RADIUS, Math.min(this.boundsWidth - PLAYER_RADIUS, newX));
       player.z = Math.max(PLAYER_RADIUS, Math.min(this.boundsDepth - PLAYER_RADIUS, newZ));
     } else {
       // Try sliding along axes
-      if (!this.collidesWithWall(newX, player.z)) {
+      if (!this.collidesAtPosition(newX, player.z, player.sessionId)) {
         player.x = Math.max(PLAYER_RADIUS, Math.min(this.boundsWidth - PLAYER_RADIUS, newX));
       }
-      if (!this.collidesWithWall(player.x, newZ)) {
+      if (!this.collidesAtPosition(player.x, newZ, player.sessionId)) {
         player.z = Math.max(PLAYER_RADIUS, Math.min(this.boundsDepth - PLAYER_RADIUS, newZ));
       }
     }
@@ -115,6 +124,25 @@ export class PhysicsSystem {
       if (height > maxHeight) maxHeight = height;
     }
     return maxHeight;
+  }
+
+  private collidesWithPlayer(x: number, z: number, selfId: string): boolean {
+    if (!this.state) return false;
+    const minDistSq = (PLAYER_RADIUS * 2) * (PLAYER_RADIUS * 2);
+    let collides = false;
+    this.state.players.forEach((other) => {
+      if (collides || other.sessionId === selfId || !other.alive) return;
+      const dx = x - other.x;
+      const dz = z - other.z;
+      if (dx * dx + dz * dz < minDistSq) {
+        collides = true;
+      }
+    });
+    return collides;
+  }
+
+  private collidesAtPosition(x: number, z: number, selfId: string): boolean {
+    return this.collidesWithWall(x, z) || this.collidesWithPlayer(x, z, selfId);
   }
 
   collidesWithWall(x: number, z: number): boolean {

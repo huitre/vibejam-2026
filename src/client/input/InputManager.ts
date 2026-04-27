@@ -8,6 +8,7 @@ export class InputManager {
 
   constructor() {
     window.addEventListener("keydown", (e) => {
+      if (e.code === "Tab") e.preventDefault();
       if (!this.keys.has(e.code)) {
         this.justPressed.add(e.code);
       }
@@ -18,6 +19,7 @@ export class InputManager {
       this.justReleased.add(e.code);
     });
     window.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement)?.closest?.(".lil-gui")) return;
       const btn = e.button === 0 ? "MouseLeft" : e.button === 2 ? "MouseRight" : `Mouse${e.button}`;
       if (!this.keys.has(btn)) {
         this.justPressed.add(btn);
@@ -25,6 +27,7 @@ export class InputManager {
       this.keys.add(btn);
     });
     window.addEventListener("mouseup", (e) => {
+      if ((e.target as HTMLElement)?.closest?.(".lil-gui")) return;
       const btn = e.button === 0 ? "MouseLeft" : e.button === 2 ? "MouseRight" : `Mouse${e.button}`;
       this.keys.delete(btn);
       this.justReleased.add(btn);

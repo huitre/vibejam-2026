@@ -26,6 +26,9 @@ export enum AbilityType {
   TORCH_RELIGHT_CANCEL = "torch_relight_cancel",
   SHOGUN_CHARGE = "shogun_charge",
   CALTROPS = "caltrops",
+  SHADOW_DASH = "shadow_dash",
+  KAWARIMI = "kawarimi",
+  KAWARIMI_TRIGGER = "kawarimi_trigger",
 }
 
 export enum ClientMsg {
@@ -33,8 +36,10 @@ export enum ClientMsg {
   ATTACK = "attack",
   USE_ABILITY = "use_ability",
   SELECT_WEAPON = "select_weapon",
+  SELECT_ROLE = "select_role",
   READY = "ready",
   DEBUG_NOCLIP = "debug_noclip",
+  BLOCK = "block",
 }
 
 export interface SamuraiJamRoomMetadata {
@@ -52,4 +57,5 @@ export enum ServerMsg {
   PLAYER_KILLED = "player_killed",
   LAMP_CHANGED = "lamp_changed",
   PLAYER_HIT = "player_hit",
+  PLAYER_BLOCK = "player_block",
 }

@@ -6,7 +6,11 @@ export class NetworkManager {
   private room: Room | null = null;
 
   constructor() {
-    this.client = new Client("ws://localhost:2567");
+    const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    const wsUrl = isLocal
+      ? "ws://localhost:2567"
+      : `wss://${location.host}`;
+    this.client = new Client(wsUrl);
   }
 
   async getAvailableRooms(): Promise<RoomAvailable<SamuraiJamRoomMetadata>[]> {
